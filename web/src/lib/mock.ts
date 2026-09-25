@@ -2,6 +2,11 @@ import { parseUnits, type Address } from "viem";
 import type { AssetInfo, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
 import { depositAmounts, redeemAmounts, gaps } from "./math";
 import { CHAIN } from "../config";
+import feedsFile from "../../../data/robinhood-chain-feeds.json";
+
+/** Last Chainlink answer for a symbol from the committed feed directory, so demo prices are the real ones. */
+const livePrice = (symbol: string, fallback: number) =>
+  (feedsFile as { feeds: { symbol: string; kind: string; onchain: { price?: number } }[] }).feeds.find((f) => f.symbol === symbol && f.kind !== "exchange-rate")?.onchain.price ?? fallback;
 
 export const DEMO_USER: Address = "0xD3110000000000000000000000000000000000d0";
 const CONFIG_ADDR: Address = "0xC0DF000000000000000000000000000000000001";
@@ -11,21 +16,23 @@ const addr = (prefix: number, i: number): Address => `0x${prefix.toString(16).pa
 
 /** Demo catalog with today's prices; the on-chain catalog lives in config.ts. */
 const CATALOG: (CuratedAsset & { price: number })[] = [
-  { key: "SPY", symbol: "SPY", name: "S&P 500 ETF (Robinhood Stock Token)", price: 662.4, decimals: 18, token: addr(0xa0, 1), valuer: addr(0xb0, 1), unitValue: 0n },
-  { key: "NVDA", symbol: "NVDA", name: "NVIDIA (Robinhood Stock Token)", price: 185.4, decimals: 18, token: addr(0xa0, 2), valuer: addr(0xb0, 2), unitValue: 0n },
-  { key: "AAPL", symbol: "AAPL", name: "Apple (Robinhood Stock Token)", price: 338.1, decimals: 18, token: addr(0xa0, 3), valuer: addr(0xb0, 3), unitValue: 0n },
-  { key: "MSFT", symbol: "MSFT", name: "Microsoft (Robinhood Stock Token)", price: 522.7, decimals: 18, token: addr(0xa0, 4), valuer: addr(0xb0, 4), unitValue: 0n },
-  { key: "AMZN", symbol: "AMZN", name: "Amazon (Robinhood Stock Token)", price: 228.9, decimals: 18, token: addr(0xa0, 5), valuer: addr(0xb0, 5), unitValue: 0n },
-  { key: "GOOGL", symbol: "GOOGL", name: "Alphabet (Robinhood Stock Token)", price: 251.3, decimals: 18, token: addr(0xa0, 6), valuer: addr(0xb0, 6), unitValue: 0n },
-  { key: "TSLA", symbol: "TSLA", name: "Tesla (Robinhood Stock Token)", price: 431.2, decimals: 18, token: addr(0xa0, 7), valuer: addr(0xb0, 7), unitValue: 0n },
-  { key: "WETH", symbol: "WETH", name: "Wrapped Ether", price: 2662, decimals: 18, token: addr(0xa0, 8), valuer: addr(0xb0, 8), unitValue: 0n },
+  { key: "SPY", symbol: "SPY", name: "S&P 500 ETF (Robinhood Stock Token)", price: livePrice("SPY", 662.4), decimals: 18, token: addr(0xa0, 1), valuer: addr(0xb0, 1), unitValue: 0n },
+  { key: "NVDA", symbol: "NVDA", name: "NVIDIA (Robinhood Stock Token)", price: livePrice("NVDA", 185.4), decimals: 18, token: addr(0xa0, 2), valuer: addr(0xb0, 2), unitValue: 0n },
+  { key: "AAPL", symbol: "AAPL", name: "Apple (Robinhood Stock Token)", price: livePrice("AAPL", 338.1), decimals: 18, token: addr(0xa0, 3), valuer: addr(0xb0, 3), unitValue: 0n },
+  { key: "MSFT", symbol: "MSFT", name: "Microsoft (Robinhood Stock Token)", price: livePrice("MSFT", 522.7), decimals: 18, token: addr(0xa0, 4), valuer: addr(0xb0, 4), unitValue: 0n },
+  { key: "AMZN", symbol: "AMZN", name: "Amazon (Robinhood Stock Token)", price: livePrice("AMZN", 228.9), decimals: 18, token: addr(0xa0, 5), valuer: addr(0xb0, 5), unitValue: 0n },
+  { key: "GOOGL", symbol: "GOOGL", name: "Alphabet (Robinhood Stock Token)", price: livePrice("GOOGL", 251.3), decimals: 18, token: addr(0xa0, 6), valuer: addr(0xb0, 6), unitValue: 0n },
+  { key: "TSLA", symbol: "TSLA", name: "Tesla (Robinhood Stock Token)", price: livePrice("TSLA", 431.2), decimals: 18, token: addr(0xa0, 7), valuer: addr(0xb0, 7), unitValue: 0n },
+  { key: "WETH", symbol: "WETH", name: "Wrapped Ether", price: livePrice("ETH", 2662), decimals: 18, token: addr(0xa0, 8), valuer: addr(0xb0, 8), unitValue: 0n },
 ].map((a) => ({ ...a, unitValue: parseUnits(a.price.toString(), 18) }));
 
 const byKey = (k: string) => CATALOG.find((a) => a.key === k)!;
 
-function holding(key: string, weightBps: number, wholeUnits: number): AssetInfo {
+/** Holding worth `navUsd * weightBps / 1e4` at today's price, times `drift` (1 = exactly on target). */
+function holding(key: string, weightBps: number, navUsd: number, drift = 1): AssetInfo {
   const a = byKey(key);
-  const balance = parseUnits(wholeUnits.toString(), a.decimals);
+  const units = ((navUsd * weightBps) / 10_000 / a.price) * drift;
+  const balance = parseUnits(units.toFixed(6), a.decimals);
   return {
     token: a.token,
     valuer: a.valuer,
@@ -72,8 +79,8 @@ class World {
       symbol: "h20CORE",
       totalSupply: parseUnits("1200000", 18),
       lastRebalanceBlock: START_BLOCK - 21_000n,
-      // ~$1.2M: SPY 30 / NVDA 20 / AAPL 15 / MSFT 15 / AMZN 10 / GOOGL 10, NVDA slightly rich after a good day
-      assets: [holding("SPY", 3000, 543), holding("NVDA", 2000, 1_312), holding("AAPL", 1500, 532), holding("MSFT", 1500, 344), holding("AMZN", 1000, 524), holding("GOOGL", 1000, 477)],
+      // ~$1.2M: SPY 30 / NVDA 20 / AAPL 15 / MSFT 15 / AMZN 10 / GOOGL 10 at today's feed prices, NVDA a touch rich
+      assets: [holding("SPY", 3000, 1_200_000), holding("NVDA", 2000, 1_200_000, 1.011), holding("AAPL", 1500, 1_200_000, 0.997), holding("MSFT", 1500, 1_200_000), holding("AMZN", 1000, 1_200_000, 0.996), holding("GOOGL", 1000, 1_200_000)],
     }),
   ];
   shares = new Map<string, bigint>([[this.vaults[0].address, parseUnits("25000", 18)]]);
