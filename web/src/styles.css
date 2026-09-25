@@ -157,9 +157,9 @@ p { line-height: 1.6; }
 .steps .s { display: flex; gap: 12px; align-items: baseline; color: var(--muted); }
 .steps .s b { color: var(--accent); font-family: var(--mono); }
 /* create page */
-.picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.picker { display: grid; grid-template-columns: 1fr; gap: 8px; }
 @media (max-width: 700px) { .picker { grid-template-columns: 1fr; } }
-.pick { display: grid; grid-template-columns: auto 1fr auto 92px; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); }
+.pick { display: grid; grid-template-columns: auto 1fr auto 92px; gap: 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); }
 .pick.on { border-color: #3a4a60; background: var(--surface-2); }
 .pick input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
 .pick .price { color: var(--muted); font-family: var(--mono); font-size: .85rem; }
