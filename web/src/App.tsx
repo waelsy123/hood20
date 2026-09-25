@@ -21,8 +21,7 @@ function Header() {
           hood20
         </Link>
         <nav className="nav">
-          <Link to="/app" className={is("/app") ? "active" : ""}>Vaults</Link>
-          <Link to="/create" className={is("/create") ? "active" : ""}>Create</Link>
+          <Link to="/app" className={is("/app") || is("/create") ? "active" : ""}>Vaults</Link>
           <Link to="/docs" className={is("/docs") ? "active" : ""}>Docs</Link>
         </nav>
         <div className="spacer" />

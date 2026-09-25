@@ -168,3 +168,10 @@ p { line-height: 1.6; }
 .sum { font-family: var(--mono); }
 .sum.bad { color: var(--bad); }
 .sum.ok { color: var(--good); }
+
+/* create card on the vaults page */
+.create-card { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center; border-style: dashed; border-color: #34425a; background: linear-gradient(135deg, #151c27, #10151d); padding: 26px; }
+.create-card .plus { width: 52px; height: 52px; border-radius: 14px; background: rgba(245, 185, 66, .14); color: var(--accent); display: grid; place-items: center; font-size: 2rem; font-weight: 700; }
+.create-card .title { display: block; font-weight: 700; font-size: 1.15rem; margin-bottom: 4px; }
+.create-card:hover { border-color: var(--accent); text-decoration: none; }
+@media (max-width: 640px) { .create-card { grid-template-columns: auto 1fr; } .create-card .btn { grid-column: 1 / -1; } }

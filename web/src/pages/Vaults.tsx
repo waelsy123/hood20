@@ -40,6 +40,20 @@ export function VaultCard({ v }: { v: VaultInfo }) {
   );
 }
 
+function CreateCard() {
+  const { config } = useApp();
+  return (
+    <Link to="/create" className="card link create-card">
+      <span className="plus">+</span>
+      <span>
+        <span className="title">Create your own index</span>
+        <span className="muted">Pick the assets, set the weights, seed it. You earn {config ? `${config.creatorShareBps / 100}%` : "10%"} of every rebalancer's fee on your index.</span>
+      </span>
+      <span className="btn primary">Build an index</span>
+    </Link>
+  );
+}
+
 export function Vaults() {
   const { source, setError } = useApp();
   const [vaults, setVaults] = useState<VaultInfo[] | null>(null);
@@ -64,13 +78,12 @@ export function Vaults() {
       </div>
       {vaults === null ? (
         <p className="muted">Loading…</p>
-      ) : vaults.length === 0 ? (
-        <div className="card"><p className="muted">No vaults yet.</p></div>
       ) : (
         <div className="grid cols-2">
           {vaults.map((v) => (
             <VaultCard key={v.address} v={v} />
           ))}
+          <CreateCard />
         </div>
       )}
     </main>

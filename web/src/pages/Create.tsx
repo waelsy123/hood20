@@ -82,12 +82,12 @@ export function Create() {
         <div className="card">
           <h3>1 · Assets and weights</h3>
           <div className="picker">
-            {catalog.map((a, idx) => {
+            {catalog.map((a) => {
               const on = weights[a.key] !== undefined;
               return (
                 <label key={a.key} className={`pick ${on ? "on" : ""}`}>
                   <input type="checkbox" checked={on} onChange={() => toggle(a)} />
-                  <span><span className="sym">{a.symbol}</span> <span className="muted small">{a.name.replace(" (Robinhood Stock Token)", "")}</span>{balances.length ? <div className="muted small">you hold {amount(balances[idx] ?? 0n, a.decimals, 2)}</div> : null}</span>
+                  <span><span className="sym">{a.symbol}</span> <span className="muted small">{a.name.replace(" (Robinhood Stock Token)", "")}</span></span>
                   <span className="price">{usd(a.unitValue)}</span>
                   <span className="weight">{on ? <><input inputMode="numeric" value={weights[a.key]} onChange={(e) => setW(a.key, e.target.value)} />%</> : <span className="muted small">—</span>}</span>
                 </label>
