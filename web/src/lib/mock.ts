@@ -16,7 +16,7 @@ const CATALOG: (CuratedAsset & { price: number })[] = [
   { key: "AAPL", symbol: "AAPL", name: "Apple (Robinhood Stock Token)", price: 338.1, decimals: 18, token: addr(0xa0, 3), valuer: addr(0xb0, 3), unitValue: 0n },
   { key: "MSFT", symbol: "MSFT", name: "Microsoft (Robinhood Stock Token)", price: 522.7, decimals: 18, token: addr(0xa0, 4), valuer: addr(0xb0, 4), unitValue: 0n },
   { key: "AMZN", symbol: "AMZN", name: "Amazon (Robinhood Stock Token)", price: 228.9, decimals: 18, token: addr(0xa0, 5), valuer: addr(0xb0, 5), unitValue: 0n },
-  { key: "GOOG", symbol: "GOOG", name: "Alphabet (Robinhood Stock Token)", price: 251.3, decimals: 18, token: addr(0xa0, 6), valuer: addr(0xb0, 6), unitValue: 0n },
+  { key: "GOOGL", symbol: "GOOGL", name: "Alphabet (Robinhood Stock Token)", price: 251.3, decimals: 18, token: addr(0xa0, 6), valuer: addr(0xb0, 6), unitValue: 0n },
   { key: "TSLA", symbol: "TSLA", name: "Tesla (Robinhood Stock Token)", price: 431.2, decimals: 18, token: addr(0xa0, 7), valuer: addr(0xb0, 7), unitValue: 0n },
   { key: "WETH", symbol: "WETH", name: "Wrapped Ether", price: 2662, decimals: 18, token: addr(0xa0, 8), valuer: addr(0xb0, 8), unitValue: 0n },
 ].map((a) => ({ ...a, unitValue: parseUnits(a.price.toString(), 18) }));
@@ -72,8 +72,8 @@ class World {
       symbol: "h20CORE",
       totalSupply: parseUnits("1200000", 18),
       lastRebalanceBlock: START_BLOCK - 21_000n,
-      // ~$1.2M: SPY 30 / NVDA 20 / AAPL 15 / MSFT 15 / AMZN 10 / GOOG 10, NVDA slightly rich after a good day
-      assets: [holding("SPY", 3000, 543), holding("NVDA", 2000, 1_312), holding("AAPL", 1500, 532), holding("MSFT", 1500, 344), holding("AMZN", 1000, 524), holding("GOOG", 1000, 477)],
+      // ~$1.2M: SPY 30 / NVDA 20 / AAPL 15 / MSFT 15 / AMZN 10 / GOOGL 10, NVDA slightly rich after a good day
+      assets: [holding("SPY", 3000, 543), holding("NVDA", 2000, 1_312), holding("AAPL", 1500, 532), holding("MSFT", 1500, 344), holding("AMZN", 1000, 524), holding("GOOGL", 1000, 477)],
     }),
   ];
   shares = new Map<string, bigint>([[this.vaults[0].address, parseUnits("25000", 18)]]);

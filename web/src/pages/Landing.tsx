@@ -52,7 +52,7 @@ export function Landing() {
             <div className="eyebrow" style={{ color: "var(--accent)", fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", fontSize: ".8rem" }}>Robinhood Chain</div>
             <h1 style={{ marginTop: 10 }}>The market's heaviest names, <span className="glow">in one token.</span></h1>
             <p className="lead">
-              hood20 Core holds SPY, NVDA, AAPL, MSFT, AMZN and GOOG at fixed weights. Buy it, hold it, redeem the real assets whenever you like.
+              hood20 Core holds SPY, NVDA, AAPL, MSFT, AMZN and GOOGL at fixed weights. Buy it, hold it, redeem the real assets whenever you like.
               It stays on target by itself.
             </p>
             <div className="cta-row">

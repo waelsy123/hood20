@@ -8,6 +8,11 @@ Fixed-weight index vaults on Robinhood Chain (chain id 4663). Contracts in `src/
 - `script/DeployFactory.s.sol` (config + factory), `script/CreateVault.s.sol` (adapters + seeded vault). Nothing is deployed yet.
 - `web/` — landing page + dapp. `npm run build` regenerates `web/src/abi.ts` from `out/` (run `forge build` first). Contract addresses live in `web/src/config.ts`; both zero = **demo mode** with mocked vaults (`web/src/lib/mock.ts`). Set them after deploying and the same UI talks to the chain (`web/src/lib/chain.ts`).
 
+## Feed directory
+- `data/robinhood-chain-feeds.json` = Chainlink reference-data directory for Robinhood Chain + Robinhood `rhj/assets`
+  registry + live on-chain checks. Regenerate: `cd web && node scripts/feeds.mjs` (plain RPC calls; the public RPC
+  rejects JSON-RPC batches). `web/src/config.ts` derives `CURATED_ASSETS` token/feed addresses from it.
+
 ## Hosting (Cloudflare Pages, fleet standard)
 - Pages project `hood20` (account 342195c06981a49d1bc55dbf483274f1) → https://hood20.pages.dev and custom domain **https://hood20.wael.today** (zone wael.today `3bea3dd08c6aa6d38e02088b67df72c8`, `CNAME hood20 → hood20.pages.dev`, proxied — Pages is the origin).
 - Push-to-deploy: `.github/workflows/deploy-pages.yml` builds contracts + web on every push to `main` and runs `wrangler pages deploy web/dist`. Secrets `CLOUDFLARE_API_TOKEN` (Pages:Edit-only token) and `CLOUDFLARE_ACCOUNT_ID` are set on the GitHub repo.

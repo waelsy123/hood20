@@ -148,6 +148,14 @@ remove: if the vault address were blocked for one asset, redemptions of every as
 - Seed the vault in the deployment run (`SEED_AMOUNTS`) so nobody can front-run the first deposit with a dust
   deposit that sets a skewed initial mix. Dust would be fixable via a rebalance, but avoid the churn.
 
+## Price feeds and tokens on Robinhood Chain
+
+[`data/robinhood-chain-feeds.json`](data/robinhood-chain-feeds.json) is the single reference for oracle and token
+addresses: every Chainlink feed on the chain (proxy, current aggregator, decimals, heartbeat, deviation trigger,
+Chainlink risk tier, market hours) merged with Robinhood's stock-token registry (address, decimals, ISIN, ERC-8056
+multiplier, trading status), each checked live on-chain (price, last update, aggregator match, token symbol).
+Regenerate with `cd web && node scripts/feeds.mjs`; the dapp's curated catalog reads token and feed addresses from it.
+
 ## Gas (10-asset vault)
 
 | Call | Gas | USD today |

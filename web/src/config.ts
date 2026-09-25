@@ -1,4 +1,5 @@
 import type { Address } from "viem";
+import feedsFile from "../../data/robinhood-chain-feeds.json";
 
 export const ZERO: Address = "0x0000000000000000000000000000000000000000";
 
@@ -23,20 +24,39 @@ export const ADDRESSES: { factory: Address; config: Address } = {
 
 export const MOCK = ADDRESSES.factory === ZERO;
 
+/** Verified Chainlink feed and token addresses on Robinhood Chain (data/robinhood-chain-feeds.json, `node scripts/feeds.mjs`). */
+type FeedEntry = { symbol: string; kind: string; proxy: string; token: { symbol?: string; address?: string | null; decimals?: number } | null };
+const FEEDS = (feedsFile as { feeds: FeedEntry[] }).feeds;
+const feedFor = (symbol: string) => FEEDS.find((f) => f.symbol === symbol && f.kind !== "exchange-rate");
+
 /**
- * Assets creators may pick from. Each needs a token and a deployed ChainlinkAdapter (valuer). In demo mode the
- * mock world supplies its own catalog with prices, so these placeholders are only read once contracts are live.
+ * Assets creators may pick from. Token and feed addresses come from the verified feed directory; `valuer` is the
+ * ChainlinkAdapter deployed for that pair and stays ZERO until adapters are live (the app then still runs in
+ * demo mode because the factory address is ZERO).
  */
-export const CURATED_ASSETS: { key: string; symbol: string; name: string; token: Address; valuer: Address; decimals: number }[] = [
-  { key: "SPY", symbol: "SPY", name: "S&P 500 ETF (Robinhood Stock Token)", token: ZERO, valuer: ZERO, decimals: 18 },
-  { key: "NVDA", symbol: "NVDA", name: "NVIDIA (Robinhood Stock Token)", token: ZERO, valuer: ZERO, decimals: 18 },
-  { key: "AAPL", symbol: "AAPL", name: "Apple (Robinhood Stock Token)", token: ZERO, valuer: ZERO, decimals: 18 },
-  { key: "MSFT", symbol: "MSFT", name: "Microsoft (Robinhood Stock Token)", token: ZERO, valuer: ZERO, decimals: 18 },
-  { key: "AMZN", symbol: "AMZN", name: "Amazon (Robinhood Stock Token)", token: ZERO, valuer: ZERO, decimals: 18 },
-  { key: "GOOG", symbol: "GOOG", name: "Alphabet (Robinhood Stock Token)", token: ZERO, valuer: ZERO, decimals: 18 },
-  { key: "TSLA", symbol: "TSLA", name: "Tesla (Robinhood Stock Token)", token: ZERO, valuer: ZERO, decimals: 18 },
-  { key: "WETH", symbol: "WETH", name: "Wrapped Ether", token: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", valuer: ZERO, decimals: 18 },
-];
+export const CURATED_ASSETS: { key: string; symbol: string; name: string; token: Address; feed: Address; valuer: Address; decimals: number }[] = (
+  [
+    ["SPY", "S&P 500 ETF (Robinhood Stock Token)"],
+    ["NVDA", "NVIDIA (Robinhood Stock Token)"],
+    ["AAPL", "Apple (Robinhood Stock Token)"],
+    ["MSFT", "Microsoft (Robinhood Stock Token)"],
+    ["AMZN", "Amazon (Robinhood Stock Token)"],
+    ["GOOGL", "Alphabet (Robinhood Stock Token)"],
+    ["TSLA", "Tesla (Robinhood Stock Token)"],
+    ["ETH", "Wrapped Ether"],
+  ] as const
+).map(([symbol, name]) => {
+  const f = feedFor(symbol);
+  return {
+    key: symbol === "ETH" ? "WETH" : symbol,
+    symbol: symbol === "ETH" ? "WETH" : symbol,
+    name,
+    token: ((f?.token?.address as Address | undefined) ?? ZERO) as Address,
+    feed: ((f?.proxy as Address | undefined) ?? ZERO) as Address,
+    valuer: ZERO,
+    decimals: f?.token?.decimals ?? 18,
+  };
+});
 
 export const LINKS = {
   repo: "https://github.com/waelsy123/hood20",
