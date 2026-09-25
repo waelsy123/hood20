@@ -44,6 +44,21 @@ target_i = (nav - profit) * weight_i / 1e4         // targets on the post-incent
 pull_i   = floor((value_i - target_i) / price_i)   // overweight assets
 push_i   = ceil((target_i - value_i) / price_i)    // underweight assets`}</pre>
       <p className="muted small">A second rebalance right after a successful one reverts: the vault is balanced and the interval is running.</p>
+      <h3>Creators earn on every rebalance</h3>
+      <p>
+        Holders pay at most the configured incentive of the misplaced value. That budget is shared: the rebalancer keeps up to
+        incentive ÷ (1 + creator share), and the index creator receives newly minted shares worth {config ? `${config.creatorShareBps / 100}%` : "10%"} of
+        whatever the rebalancer actually kept. Creators earn without raising the cost to holders; a rebalance that keeps nothing pays nothing.
+      </p>
+
+      <h2 id="security">Built to be hard to abuse</h2>
+      <ul style={{ lineHeight: 1.7 }}>
+        <li>No owner on the vault, no upgrades, no protocol trades. The creator only ever receives minted shares.</li>
+        <li>Pull-rights exist only inside a rebalance callback and are revoked before the balance check.</li>
+        <li>NAV may drop by at most the incentive on the misplaced value; pulling without pushing, pushing without pulling or keeping more all revert.</li>
+        <li>Feeds that are stale, invalid or closed make the vault refuse to rebalance. Weekends fail closed.</li>
+        <li>Deposits and redemptions never touch an oracle, so nobody can mint against a stale price.</li>
+      </ul>
 
       <h2 id="config">Shared config</h2>
       <p>One owner-managed contract, read live by every vault, with hard caps so users know the worst case up front.</p>
@@ -52,7 +67,8 @@ push_i   = ceil((target_i - value_i) / price_i)    // underweight assets`}</pre>
           <thead><tr><th>Setting</th><th>Current</th><th>Hard cap</th><th>Used by</th></tr></thead>
           <tbody>
             <tr><td>Threshold</td><td className="num">{config ? pct(config.thresholdBps) : "—"}</td><td className="num">10%</td><td>drift required before a rebalance</td></tr>
-            <tr><td>Incentive</td><td className="num">{config ? pct(config.incentiveBps) : "—"}</td><td className="num">1%</td><td>share of the misplaced value a rebalancer may keep</td></tr>
+            <tr><td>Incentive</td><td className="num">{config ? pct(config.incentiveBps) : "—"}</td><td className="num">1%</td><td>what holders pay per rebalance, as a share of the misplaced value</td></tr>
+            <tr><td>Creator share</td><td className="num">{config ? pct(config.creatorShareBps, 0) : "—"}</td><td className="num">50%</td><td>the creator's cut of what the rebalancer kept, minted as shares</td></tr>
             <tr><td>Interval</td><td className="num">{config ? config.rebalanceInterval.toLocaleString() : "—"} blocks</td><td className="num">1,000,000</td><td>minimum blocks between two rebalances of a vault</td></tr>
             <tr><td>Redeem fee</td><td className="num">{config ? (config.redeemFeeBps ? pct(config.redeemFeeBps) : "off") : "—"}</td><td className="num">5%</td><td>slice of redeemed shares sent to the fee recipient</td></tr>
           </tbody>

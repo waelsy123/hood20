@@ -12,8 +12,26 @@ export type AssetInfo = {
   unitValue: bigint; // USD value of one whole token, 18 decimals
 };
 
+export type CuratedAsset = {
+  key: string;
+  symbol: string;
+  name: string;
+  token: Address;
+  valuer: Address;
+  decimals: number;
+  unitValue: bigint; // USD value of one whole token, 18 decimals
+};
+
+export type CreateInput = {
+  name: string;
+  symbol: string;
+  picks: { asset: CuratedAsset; weightBps: number }[];
+  seedAmounts: bigint[]; // raw units, one per pick
+};
+
 export type VaultInfo = {
   address: Address;
+  creator: Address;
   name: string;
   symbol: string;
   totalSupply: bigint;
@@ -28,6 +46,7 @@ export type ConfigInfo = {
   owner: Address;
   thresholdBps: number;
   incentiveBps: number;
+  creatorShareBps: number;
   rebalanceInterval: number;
   redeemFeeBps: number;
   feeRecipient: Address;
@@ -51,4 +70,7 @@ export interface Source {
   approve(vault: VaultInfo, assetIndex: number, amount: bigint, user: Address): Promise<TxResult>;
   deposit(vault: VaultInfo, maxAmounts: bigint[], minShares: bigint, user: Address): Promise<TxResult>;
   redeem(vault: VaultInfo, shares: bigint, user: Address): Promise<TxResult>;
+  listAssets(): Promise<CuratedAsset[]>;
+  walletBalances(assets: CuratedAsset[], user: Address): Promise<bigint[]>;
+  createVault(input: CreateInput, user: Address): Promise<TxResult & { vault: Address }>;
 }

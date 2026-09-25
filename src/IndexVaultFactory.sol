@@ -22,14 +22,15 @@ contract IndexVaultFactory {
     }
 
     /// @notice Deploy a vault and make its first deposit: `seed[i]` raw units of `assets_[i].token` are pulled
-    ///         from the caller (approve the factory first) and the minted INDEX goes to the caller.
+    ///         from the caller (approve the factory first) and the minted INDEX goes to the caller, who is also
+    ///         recorded as the index creator and earns the configured cut of every rebalance.
     function create(
         string calldata name,
         string calldata symbol,
         IndexVault.Asset[] calldata assets_,
         uint256[] calldata seed
     ) external returns (IndexVault vault) {
-        vault = new IndexVault(name, symbol, assets_, config);
+        vault = new IndexVault(name, symbol, assets_, config, msg.sender);
         vaults.push(vault);
         for (uint256 i; i < assets_.length; ++i) {
             assets_[i].token.safeTransferFrom(msg.sender, address(this), seed[i]);

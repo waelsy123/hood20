@@ -24,6 +24,7 @@ contract IndexVaultTest is Test {
 
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
+    address creator = makeAddr("creator"); // recorded on every vault built by _new
 
     uint256 constant WETH_PRICE = 2500e8; // $2,500
     uint256 constant STOCK_PRICE = 50e18; // $50
@@ -58,7 +59,7 @@ contract IndexVaultTest is Test {
         internal
         returns (IndexVault)
     {
-        return new IndexVault(name, symbol, assets_, config);
+        return new IndexVault(name, symbol, assets_, config, creator);
     }
 
     /// An asset backed by a fresh ChainlinkAdapter with a 25h staleness limit.
@@ -113,7 +114,8 @@ contract IndexVaultTest is Test {
         feedWeth.set(int256(2575e8));
     }
 
-    /// The most a rebalancer may keep right now: the configured share of the value sitting above target.
+    /// The most a rebalancer may keep right now: holders pay at most incentiveBps of the misplaced value, and the
+    /// creator's cut (creatorShareBps of the rebalancer's take) comes out of that budget.
     function _incentiveCap(IndexVault v) internal view returns (uint256) {
         (uint256[] memory vals, uint256 nav) = v.snapshot();
         uint256 misplaced;
@@ -122,7 +124,7 @@ contract IndexVaultTest is Test {
             uint256 target = nav * weight / 10_000;
             if (vals[i] > target) misplaced += vals[i] - target;
         }
-        return misplaced * config.incentiveBps() / 10_000;
+        return misplaced * config.incentiveBps() / (10_000 + config.creatorShareBps());
     }
 
     /// Pulls/pushes that put every asset exactly on target at NAV - profit (pulls rounded down, pushes up).
@@ -161,6 +163,10 @@ contract IndexVaultTest is Test {
         vm.expectRevert(IndexVault.DuplicateAsset.selector);
         _new("x", "x", dup);
 
+        IndexVault.Asset[] memory ok = _twoAssets(5000, 5000);
+        vm.expectRevert(IndexVault.ZeroCreator.selector);
+        new IndexVault("x", "x", ok, config, address(0));
+
         IndexVault.Asset[] memory wrong = _twoAssets(5000, 5000);
         wrong[1].valuer = wrong[0].valuer; // a WETH valuer paired with the stock token
         vm.expectRevert(IndexVault.WrongValuer.selector);
@@ -168,6 +174,7 @@ contract IndexVaultTest is Test {
 
         IndexVault v = _new("x", "x", _threeAssets(5000, 3000, 2000));
         assertEq(v.assetCount(), 3);
+        assertEq(v.creator(), creator);
         (IERC20 token, IValuer valuer, uint256 weight) = v.assets(2);
         assertEq(address(token), address(usdg));
         assertEq(weight, 2000);
@@ -258,13 +265,15 @@ contract IndexVaultTest is Test {
     }
 
     function test_RebalanceBriefStyleExchangeKeepsTheIncentive() public {
-        // $7,500 of WETH sits above target, so the rebalancer may keep 0.5% = $37.50. Brief-style exchange:
-        // send in the $7,500 shortfall of stock, take $7,537.50 of WETH, asking for pull-rights over WETH only.
+        // $7,500 of WETH sits above target, so the rebalancer may keep 0.5% = $37.50 once the creator share is
+        // off. Brief-style exchange: send in the $7,500 shortfall of stock, take $7,537.50 of WETH, asking for
+        // pull-rights over WETH only.
+        config.set(50, 50, 0, 18_000, 0, address(0));
         _drift();
         uint256 wethOut = uint256(7537.5e18) * 1e26 / (uint256(2575e8) * 1e18);
         uint256 navAfter = (SEED_WETH - wethOut) * uint256(2575e8) * 1e18 / 1e26 + 507_500e18;
         vm.expectEmit();
-        emit IndexVault.Rebalanced(address(arb), navAfter);
+        emit IndexVault.Rebalanced(address(arb), navAfter, 0);
         arb.run(_ids(1), _arr(wethOut, 0), _arr(0, 150e6));
 
         assertEq(weth.balanceOf(address(arb)), FUNDING_WETH + wethOut);
@@ -370,7 +379,7 @@ contract IndexVaultTest is Test {
         feedWeth.set(int256(WETH_PRICE * 110 / 100)); // WETH $550k: NAV $1.05M, $25k above its $525k target
         assertEq(v.deviationBps(), 238); // 25,000 / 1,050,000
         uint256 cap = _incentiveCap(v);
-        assertEq(cap, 125e18);
+        assertEq(cap, uint256(25_000e18) * 50 / 11_000); // $113.64 for the rebalancer, $11.36 for the creator
 
         // Only WETH leaves the vault, so pull-rights are requested over WETH alone; stock and USDG are pushed in.
         (uint256[] memory pulls, uint256[] memory pushes) = _plan(v, cap);
@@ -378,10 +387,11 @@ contract IndexVaultTest is Test {
 
         assertEq(v.deviationBps(), 0);
         (uint256[] memory vals, uint256 nav) = v.snapshot();
-        assertApproxEqAbs(nav, 1_049_875e18, 1e15); // $125 kept by the rebalancer
-        assertApproxEqAbs(vals[0], 524_937.5e18, 1e15);
-        assertApproxEqAbs(vals[1], 314_962.5e18, 1e15);
-        assertApproxEqAbs(vals[2], 209_975e18, 1e15);
+        assertApproxEqAbs(nav, 1_050_000e18 - cap, 1e15);
+        assertApproxEqAbs(vals[0], nav * 5000 / 10_000, 1e15);
+        assertApproxEqAbs(vals[1], nav * 3000 / 10_000, 1e15);
+        assertApproxEqAbs(vals[2], nav * 2000 / 10_000, 1e15);
+        assertApproxEqAbs(v.balanceOf(creator) * nav / v.totalSupply(), cap / 10, 1e15);
         assertEq(weth.allowance(address(v), address(bot)), 0);
     }
 
@@ -425,6 +435,7 @@ contract IndexVaultTest is Test {
         (, uint256 navAfter) = v.snapshot();
         assertEq(v.deviationBps(), 0);
         assertGe(navAfter, navBefore - cap);
+        assertEq(v.balanceOf(creator), 0); // no shares exist in this vault, so there is nothing to mint the creator
         for (uint256 i; i < 3; ++i) {
             (IERC20 token,,) = v.assets(i);
             assertEq(token.allowance(address(v), address(bot)), 0);
@@ -435,7 +446,7 @@ contract IndexVaultTest is Test {
 
     function test_RedeemFeeGoesToRecipientAsShares() public {
         address treasury = makeAddr("treasury");
-        config.set(50, 50, 18_000, 100, treasury); // 1% redeem fee
+        config.set(50, 50, 1_000, 18_000, 100, treasury); // 1% redeem fee
         vm.expectEmit();
         emit IndexVault.Redeem(alice, bob, _arr(49.5e18, 2_475e6), 247_500e18, 2_500e18);
         vm.prank(alice);
@@ -450,16 +461,33 @@ contract IndexVaultTest is Test {
     function test_ConfigChangesApplyToEveryVaultLive() public {
         _drift(); // 73 bps off target
         uint256[] memory none = new uint256[](2);
-        config.set(100, 50, 18_000, 0, address(0)); // threshold raised to 1%: no longer rebalanceable
+        config.set(100, 50, 1_000, 18_000, 0, address(0)); // threshold raised to 1%: no longer rebalanceable
         vm.expectRevert(IndexVault.BelowThreshold.selector);
         arb.run(_ids(2), none, none);
 
-        config.set(50, 0, 18_000, 0, address(0)); // no incentive: keeping anything reverts, a free rebalance passes
+        config.set(50, 0, 1_000, 18_000, 0, address(0)); // no incentive: keeping anything reverts, a free rebalance passes
         (uint256[] memory pulls, uint256[] memory pushes) = _plan(vault, 1e18);
         vm.expectRevert(IndexVault.OffTarget.selector);
         arb.run(_ids(2), pulls, pushes);
         (pulls, pushes) = _plan(vault, 0);
         arb.run(_ids(2), pulls, pushes);
         assertEq(vault.deviationBps(), 0);
+        assertEq(vault.balanceOf(creator), 0); // nothing was kept, so nothing is shared
+    }
+
+    function test_RebalanceSplitsTheIncentiveWithTheCreator() public {
+        _drift(); // $7,500 misplaced: holders pay at most $37.50, of which the rebalancer keeps up to $34.09
+        uint256 cap = _incentiveCap(vault);
+        assertEq(cap, uint256(7_500e18) * 50 / 11_000);
+        (uint256[] memory pulls, uint256[] memory pushes) = _plan(vault, cap);
+        arb.run(_ids(2), pulls, pushes);
+
+        (, uint256 nav) = vault.snapshot();
+        uint256 creatorShares = vault.balanceOf(creator);
+        assertGt(creatorShares, 0);
+        assertApproxEqAbs(creatorShares * nav / vault.totalSupply(), cap / 10, 1e15); // 10% of the rebalancer's take
+        // Holders paid exactly the configured 0.5% of the misplaced value: NAV per share fell by $37.50 / 1M shares.
+        uint256 pps = nav * 1e18 / vault.totalSupply();
+        assertApproxEqAbs(pps, (1_015_000e18 - 37.5e18) * 1e18 / 1_000_000e18, 1e9);
     }
 }

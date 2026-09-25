@@ -50,7 +50,19 @@ export function gaps(v: VaultInfo): { perAsset: Gap[]; misplaced: bigint; maxBps
   return { perAsset, misplaced, maxBps };
 }
 
-/** Largest incentive a rebalancer may keep right now, in USD (18 decimals). */
-export function incentiveAvailable(v: VaultInfo, cfg: ConfigInfo): bigint {
-  return (gaps(v).misplaced * BigInt(cfg.incentiveBps)) / BPS;
+/** What holders pay at most on the next rebalance, and how it splits between rebalancer and creator (USD, 18 dec). */
+export function incentiveSplit(v: VaultInfo, cfg: ConfigInfo): { budget: bigint; rebalancer: bigint; creator: bigint } {
+  const misplaced = gaps(v).misplaced;
+  const budget = (misplaced * BigInt(cfg.incentiveBps)) / BPS;
+  const rebalancer = (misplaced * BigInt(cfg.incentiveBps)) / (BPS + BigInt(cfg.creatorShareBps));
+  return { budget, rebalancer, creator: (rebalancer * BigInt(cfg.creatorShareBps)) / BPS };
+}
+
+/** Seed amounts (raw units) for a new vault: `usd` split by weight, priced by each asset's unit value, rounded up. */
+export function seedAmountsFor(picks: { unitValue: bigint; decimals: number; weightBps: number }[], usd: bigint): bigint[] {
+  return picks.map((p) => {
+    const value = (usd * BigInt(p.weightBps)) / BPS;
+    const unit = 10n ** BigInt(p.decimals);
+    return p.unitValue === 0n ? 0n : mulDivCeil(value, unit, p.unitValue);
+  });
 }

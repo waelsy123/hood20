@@ -1,92 +1,92 @@
 import { useEffect, useState } from "react";
 import { MOCK } from "../config";
 import { useApp } from "../lib/context";
-import { pct, usdCompact } from "../lib/format";
+import { pct, usd, usdCompact } from "../lib/format";
+import { navPerShare } from "../lib/math";
 import { Link } from "../lib/router";
+import { rebalanceState } from "../lib/status";
 import type { VaultInfo } from "../lib/types";
-import { VaultCard } from "./Vaults";
+
+function Flagship({ v }: { v: VaultInfo }) {
+  const { config, block } = useApp();
+  const s = rebalanceState(v, config, block);
+  const max = Math.max(...v.assets.map((a) => a.weightBps));
+  return (
+    <div className="flag">
+      <div className="top">
+        <div><div className="name">{v.name}</div><div className="sub mono">{v.symbol} · {v.assets.length} assets</div></div>
+        <span className={`pill ${s.kind === "open" ? "warn" : "good"}`}><span className="dot" />{s.kind === "open" ? "rebalance open" : "on target"}</span>
+      </div>
+      <div className="big">{usd(navPerShare(v), 4)}</div>
+      <div className="sub">per share · {usdCompact(v.nav)} in the vault · max drift {pct(v.deviationBps)}</div>
+      <div className="comp">
+        {v.assets.map((a) => (
+          <div className="r" key={a.token}>
+            <span className="sym">{a.symbol}</span>
+            <span className="track"><i style={{ width: `${(a.weightBps / max) * 100}%` }} /></span>
+            <span className="pct">{pct(a.weightBps, 0)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="cta">
+        <Link to={`/app/vault/${v.address}`} className="btn primary">Get {v.symbol}</Link>
+        <Link to={`/app/vault/${v.address}`} className="btn">Details</Link>
+      </div>
+    </div>
+  );
+}
 
 export function Landing() {
-  const { source, config } = useApp();
+  const { source } = useApp();
   const [vaults, setVaults] = useState<VaultInfo[]>([]);
   useEffect(() => {
     source.listVaults().then(setVaults).catch(() => setVaults([]));
   }, [source]);
-  const tvl = vaults.reduce((s, v) => s + v.nav, 0n);
+  const flagship = vaults[0];
 
   return (
     <main>
-      <section className="hero container">
-        <div className="eyebrow">Robinhood Chain · tokenized stocks and crypto</div>
-        <h1>Index vaults the market keeps balanced.</h1>
-        <p className="lead">
-          Fixed-weight baskets of tokenized stocks and crypto. Deposit and redeem pro-rata at any time. When prices drift,
-          anyone can rebalance the vault at oracle prices for a fixed incentive. The protocol never trades.
-        </p>
-        <div className="cta-row">
-          <Link to="/app" className="btn primary lg">Open the app</Link>
-          <Link to="/docs" className="btn lg">How it works</Link>
-        </div>
-        {MOCK && (
-          <div className="banner">
-            Demo mode: the contracts are audited-in-progress and not deployed yet. The app runs on mocked vaults so every flow can be tried end to end.
+      <section className="hero2">
+        <div className="container">
+          <div>
+            <div className="eyebrow" style={{ color: "var(--accent)", fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", fontSize: ".8rem" }}>Robinhood Chain</div>
+            <h1 style={{ marginTop: 10 }}>The market's heaviest names, <span className="glow">in one token.</span></h1>
+            <p className="lead">
+              hood20 Core holds SPY, NVDA, AAPL, MSFT, AMZN and GOOG at fixed weights. Buy it, hold it, redeem the real assets whenever you like.
+              It stays on target by itself.
+            </p>
+            <div className="cta-row">
+              {flagship ? <Link to={`/app/vault/${flagship.address}`} className="btn primary lg">Get {flagship.symbol}</Link> : <Link to="/app" className="btn primary lg">Open the app</Link>}
+              <Link to="/create" className="btn lg">Create your own index</Link>
+            </div>
+            {MOCK && <p className="muted small" style={{ marginTop: 18 }}>Demo mode: contracts are not deployed yet, so every number here is simulated. The flows are real.</p>}
           </div>
-        )}
+          <div>{flagship ? <Flagship v={flagship} /> : <div className="flag"><div className="name">Loading…</div></div>}</div>
+        </div>
       </section>
 
       <section className="container">
-        <div className="grid cols-4">
-          <div className="card stat"><span className="label">Vaults</span><span className="value">{vaults.length}</span></div>
-          <div className="card stat"><span className="label">Total value</span><span className="value">{usdCompact(tvl)}</span></div>
-          <div className="card stat"><span className="label">Rebalance threshold</span><span className="value">{config ? pct(config.thresholdBps) : "—"}</span></div>
-          <div className="card stat"><span className="label">Rebalancer incentive</span><span className="value">{config ? pct(config.incentiveBps) : "—"}</span></div>
+        <div className="outcomes">
+          <div className="outcome"><div className="k">always on target</div><h3>Rebalanced by the market</h3><p>Whenever the mix drifts, arbitrageurs are paid to bring it back. No manager, no protocol trades, no waiting.</p></div>
+          <div className="outcome"><div className="k">fully backed</div><h3>Redeem the real assets</h3><p>Every token is backed one-to-one by the basket. Redeem for your share of each asset at any moment.</p></div>
+          <div className="outcome"><div className="k">creators earn</div><h3>Launch your own index</h3><p>Pick the assets, set the weights, seed it. You earn 10% of every rebalancer's fee on your index, forever.</p></div>
         </div>
       </section>
 
-      <section className="section container">
-        <h2>How it works</h2>
-        <p className="muted">Three moving parts. None of them is a manager.</p>
-        <div className="grid cols-3" style={{ marginTop: 28 }}>
-          <div className="card step"><span className="num">1</span><h3>Deposit pro-rata</h3><p className="muted">You add every asset in the vault's current ratio and receive INDEX shares. Redeem any time for your slice of each asset. No oracle is involved, so nobody can mint against a stale price.</p></div>
-          <div className="card step"><span className="num">2</span><h3>Prices drift</h3><p className="muted">Each asset is valued through its own Chainlink adapter. Once any asset sits 0.5% of NAV away from its target weight, the vault is open for rebalancing.</p></div>
-          <div className="card step"><span className="num">3</span><h3>The market rebalances</h3><p className="muted">Any contract can pull the excess of overweight assets and push in the shortfall of underweight ones, keeping 0.5% of the misplaced value. The call reverts unless the vault lands back on target.</p></div>
-        </div>
-        <div className="quote">The protocol does not rebalance the portfolio. The market does.</div>
-      </section>
-
-      <section className="section container" style={{ paddingTop: 0 }}>
-        <div className="grid cols-2">
-          <div className="card">
-            <h3>Built to be hard to abuse</h3>
-            <ul className="muted" style={{ lineHeight: 1.7, paddingLeft: 18 }}>
-              <li>No owner on the vault, no upgrades, no protocol trades.</li>
-              <li>Pull-rights exist only inside a rebalance callback and are revoked before the balance check.</li>
-              <li>NAV may drop by at most the incentive on the misplaced value; anything else reverts.</li>
-              <li>Feeds that are stale, invalid or closed make the vault refuse to rebalance. Weekends fail closed.</li>
-              <li>Shared settings live in one config with hard caps: fee ≤ 5%, incentive ≤ 1%, threshold ≤ 10%.</li>
-            </ul>
+      <section className="container">
+        <div className="create-cta">
+          <div>
+            <h2>Your index, your weights.</h2>
+            <p className="muted" style={{ marginTop: 0 }}>Three steps and a seed deposit. The factory deploys the vault and makes the first deposit in one transaction, so nobody can front-run your launch.</p>
+            <Link to="/create" className="btn primary">Build an index</Link>
           </div>
-          <div className="card">
-            <h3>For arbitrageurs</h3>
-            <p className="muted">Implement one function, <code>onRebalance(bytes)</code>, and do the exchange your way: inventory, a DEX route, or a Uniswap v2 flash swap. The vault lends you allowance over the assets you name, calls you back, revokes, and verifies.</p>
-            <Link to="/docs" className="btn sm">Rebalancer guide</Link>
+          <div className="steps">
+            <div className="s"><b>01</b><span>Pick from the curated stocks and crypto</span></div>
+            <div className="s"><b>02</b><span>Set weights that add up to 100%</span></div>
+            <div className="s"><b>03</b><span>Seed it and share the token</span></div>
           </div>
         </div>
       </section>
-
-      {vaults.length > 0 && (
-        <section className="section container" style={{ paddingTop: 0 }}>
-          <div className="page-head" style={{ marginTop: 0 }}>
-            <h2>Vaults</h2>
-            <Link to="/app" className="btn sm">See all</Link>
-          </div>
-          <div className="grid cols-2">
-            {vaults.slice(0, 2).map((v) => (
-              <VaultCard key={v.address} v={v} />
-            ))}
-          </div>
-        </section>
-      )}
     </main>
   );
 }

@@ -3,7 +3,7 @@ import { formatUnits, parseUnits, type Address } from "viem";
 import { CHAIN, MOCK } from "../config";
 import { useApp } from "../lib/context";
 import { amount, blocksToTime, pct, short, usd } from "../lib/format";
-import { depositAmounts, gaps, incentiveAvailable, navPerShare, redeemAmounts, sharesForUsd, WAD } from "../lib/math";
+import { depositAmounts, gaps, incentiveSplit, navPerShare, redeemAmounts, sharesForUsd, WAD } from "../lib/math";
 import { Link } from "../lib/router";
 import { rebalanceState } from "../lib/status";
 import type { Position, VaultInfo } from "../lib/types";
@@ -108,7 +108,7 @@ export function Vault({ address }: { address: Address }) {
 
   const pps = navPerShare(v);
   const myValue = pos ? (pos.shares * pps) / WAD : 0n;
-  const inc = config ? incentiveAvailable(v, config) : 0n;
+  const split = config ? incentiveSplit(v, config) : { budget: 0n, rebalancer: 0n, creator: 0n };
 
   return (
     <main className="container" style={{ minHeight: "60vh" }}>
@@ -116,7 +116,7 @@ export function Vault({ address }: { address: Address }) {
         <div>
           <Link to="/app" className="muted small">← all vaults</Link>
           <h2 style={{ marginTop: 6 }}>{v.name} <span className="muted mono small">{v.symbol}</span></h2>
-          <span className="muted mono small">{v.address}</span>
+          <span className="muted mono small">{v.address} · created by {short(v.creator)}</span>
         </div>
         <StatePill v={v} />
       </div>
@@ -161,7 +161,8 @@ export function Vault({ address }: { address: Address }) {
             </div>
             <div className={`bar ${state?.kind === "balanced" ? "good" : ""}`}><div style={{ width: `${Math.min(100, config ? (v.deviationBps / Math.max(1, config.thresholdBps)) * 100 : 0)}%` }} /></div>
             <dl className="kv" style={{ marginTop: 14 }}>
-              <dt>Incentive available</dt><dd>{usd(inc)} <span className="muted">({config ? pct(config.incentiveBps) : "—"} of {usd(g!.misplaced)} misplaced)</span></dd>
+              <dt>Rebalancer keeps up to</dt><dd>{usd(split.rebalancer)} <span className="muted">(holders pay {config ? pct(config.incentiveBps) : "—"} of {usd(g!.misplaced)} misplaced)</span></dd>
+              <dt>Creator earns</dt><dd>{usd(split.creator)} <span className="muted">({config ? pct(config.creatorShareBps, 0) : "—"} of the rebalancer's take, as {v.symbol})</span></dd>
               <dt>Interval</dt>
               <dd>
                 {state?.kind === "cooldown"

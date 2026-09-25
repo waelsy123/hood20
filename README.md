@@ -29,8 +29,10 @@ struct Asset {
 
 Inside the callback the rebalancer does whatever it likes: pull the excess of overweight assets with
 `transferFrom(vault, …)`, send in the shortfall of underweight ones with `transfer(vault, …)`, route through a DEX,
-take a Uniswap v2 flash swap, use its own inventory. It may keep up to **0.5% of the misplaced value** (the total
-value sitting above target before the call).
+take a Uniswap v2 flash swap, use its own inventory. Holders pay at most **0.5% of the misplaced value** (the total
+value sitting above target before the call). That budget is shared: the rebalancer keeps up to 0.5% ÷ 1.1 ≈ 0.45%,
+and the **index creator** receives INDEX worth 10% of whatever the rebalancer actually kept, minted after the
+balance check. Creators earn on every rebalance of their index without raising the cost to holders.
 
 ```solidity
 interface IRebalancer {
@@ -44,11 +46,12 @@ less than 0.01% of NAV away from its target at the post-rebalance NAV. To land t
 `NAV − profit` (the NAV the vault will hold after you keep `profit ≤ 0.5% × misplaced`); the test helper `_plan`
 does this.
 
-Worked example (WETH +3% on a $1M 50/50 vault): $515,000 vs $500,000 → $7,500 sits above target → the rebalancer
-may keep $37.50. Brief-style exchange: send in $7,500 of stock, take $7,537.50 of WETH, pull-rights requested over
-WETH only. The vault ends $18.75 under target on WETH, far inside the tolerance
-(`test_RebalanceBriefStyleExchangeKeepsTheIncentive`). With three assets one callback settles all of them
-(`test_ThreeAssets_RebalanceLandsOnTargetKeepingTheIncentive`).
+Worked example (WETH +3% on a $1M 50/50 vault): $515,000 vs $500,000 → $7,500 sits above target → holders pay at
+most $37.50: the rebalancer keeps up to $34.09 and the creator receives INDEX worth $3.41
+(`test_RebalanceSplitsTheIncentiveWithTheCreator`). With the creator share off, a brief-style exchange sends in
+$7,500 of stock and takes $7,537.50 of WETH with pull-rights over WETH only; the vault ends $18.75 under target on
+WETH, far inside the tolerance (`test_RebalanceBriefStyleExchangeKeepsTheIncentive`). With three assets one callback
+settles all of them (`test_ThreeAssets_RebalanceLandsOnTargetKeepingTheIncentive`).
 
 ## Price sources
 
@@ -90,7 +93,8 @@ applies to all of them:
 | Setting | Default | Hard cap | Used by |
 |---|---|---|---|
 | `thresholdBps` | 50 (0.5%) | 1,000 | drift required before `rebalance` |
-| `incentiveBps` | 50 (0.5%) | 100 | share of the misplaced value a rebalancer may keep |
+| `incentiveBps` | 50 (0.5%) | 100 | what holders pay per rebalance, as a share of the misplaced value |
+| `creatorShareBps` | 1,000 (10%) | 5,000 | the index creator's cut of what the rebalancer kept, minted as INDEX |
 | `rebalanceInterval` | 18,000 blocks (~30 min on Robinhood Chain) | 1,000,000 | minimum blocks between two rebalances of a vault |
 | `redeemFeeBps` | 0 (disabled) | 500 | slice of redeemed `INDEX` sent to `feeRecipient` instead of being burned |
 | `feeRecipient` | none | must be set when the fee is > 0 | receives the fee as `INDEX` |
@@ -103,8 +107,9 @@ can never take more than 5% of a redemption or hand rebalancers more than 1% of 
 
 - **Minimal trust, bounded by constants.** The vault and factory have no owner and no upgradeability; the asset
   list and weights are fixed at construction (weights must sum to 100%, no zero weights, no duplicate tokens).
-  The only privileged party is the config owner, who can move the threshold, incentive and redeem fee within
-  the hard caps above and nothing else. Ownership transfers are two-step.
+  The only privileged party is the config owner, who can move the threshold, incentive, creator share, interval
+  and redeem fee within the hard caps above and nothing else. Ownership transfers are two-step. The index creator
+  is recorded at launch and only ever receives newly minted INDEX; it has no powers.
 - **Deposits/redemptions are pro-rata in every asset**, so they cannot tilt the portfolio and never touch oracle
   prices. That closes the classic "mint with the stale-priced asset, redeem the others" oracle-latency arbitrage
   that value-based single-asset minting would open. The only oracle-priced mint is the very first one.
@@ -147,10 +152,10 @@ remove: if the vault address were blocked for one asset, redemptions of every as
 
 | Call | Gas | USD today |
 |---|---|---|
-| `factory.create` (deploy + seed; adapters deployed beforehand) | ~3.21M | $0.36 |
+| `factory.create` (deploy + seed; adapters deployed beforehand) | ~3.31M | $0.37 |
 | `deposit` | ~289k | $0.032 |
 | `redeem` | ~247k | $0.028 |
-| `rebalance` (10 assets listed, callback moves all 10) | ~657k | $0.073 |
+| `rebalance` (10 assets listed, callback moves all 10, creator paid) | ~671k | $0.075 |
 | `snapshot`, `deviationBps`, `assets` | views | free |
 
 Measured by [`test/Gas.t.sol`](test/Gas.t.sol) with `forge test --match-contract GasTest --isolate --gas-report`
@@ -169,7 +174,7 @@ the ABIs from the Forge artifacts so the dapp can never drift from the contracts
 
 ```sh
 forge build
-forge test -vv          # 25 tests incl. two fuzz properties (1,000 runs each)
+forge test -vv          # 26 tests incl. two fuzz properties (1,000 runs each)
 forge fmt --check
 slither .               # optional static analysis
 ```

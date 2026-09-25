@@ -54,6 +54,7 @@ contract IndexVaultFactoryTest is Test {
 
         assertEq(address(vault), address(predicted));
         assertEq(address(vault.config()), address(config));
+        assertEq(vault.creator(), alice); // the creator earns a cut of every rebalance
         assertEq(vault.balanceOf(alice), 1_000_000e18); // 1 INDEX per USD, straight to the creator
         assertEq(weth.balanceOf(address(vault)), 200e18);
         assertEq(stock.balanceOf(address(vault)), 10_000e6);

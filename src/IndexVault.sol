@@ -24,7 +24,8 @@ interface IRebalancer {
 ///    the exchange its own way (inventory, DEX, flash swaps) and keeps up to the configured share of
 ///    the misplaced value. Allowances are revoked afterwards and the call reverts unless the vault is
 ///    balanced again, so the pull-rights can never drain it and a mispriced source can cost at most a
-///    fraction of the current imbalance.
+///    fraction of the current imbalance. The index creator earns a configured cut of whatever the
+///    rebalancer kept, minted as INDEX, without raising the cost to holders.
 ///  Threshold, incentive, minimum block interval between rebalances and an optional redeem fee are read
 ///  live from a shared IndexConfig whose owner can change them within hard caps. The vault itself has no
 ///  owner and no upgradeability; changing a price source means creating a successor vault.
@@ -39,8 +40,10 @@ contract IndexVault is ERC20, ReentrancyGuard {
 
     uint256 private constant BPS = 10_000;
 
-    /// @notice Shared settings: drift threshold, rebalance incentive, rebalance interval, redeem fee.
+    /// @notice Shared settings: drift threshold, rebalance incentive, creator share, rebalance interval, redeem fee.
     IndexConfig public immutable config;
+    /// @notice Whoever launched this index; earns the configured share of every rebalancer's take, paid in INDEX.
+    address public immutable creator;
     /// @notice The portfolio, fixed at construction.
     Asset[] public assets;
     /// @notice Block of the last successful rebalance; the configured interval must pass before the next one.
@@ -48,11 +51,12 @@ contract IndexVault is ERC20, ReentrancyGuard {
 
     event Deposit(address indexed sender, address indexed to, uint256[] amounts, uint256 shares);
     event Redeem(address indexed sender, address indexed to, uint256[] amounts, uint256 shares, uint256 fee);
-    event Rebalanced(address indexed rebalancer, uint256 nav);
+    event Rebalanced(address indexed rebalancer, uint256 nav, uint256 creatorShares);
 
     error InvalidWeights();
     error DuplicateAsset();
     error WrongValuer();
+    error ZeroCreator();
     error LengthMismatch();
     error ZeroAmount();
     error Slippage();
@@ -60,10 +64,16 @@ contract IndexVault is ERC20, ReentrancyGuard {
     error TooSoon();
     error OffTarget();
 
-    constructor(string memory name_, string memory symbol_, Asset[] memory assets_, IndexConfig config_)
-        ERC20(name_, symbol_)
-    {
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        Asset[] memory assets_,
+        IndexConfig config_,
+        address creator_
+    ) ERC20(name_, symbol_) {
+        if (creator_ == address(0)) revert ZeroCreator();
         config = config_;
+        creator = creator_;
         uint256 totalWeight;
         for (uint256 i; i < assets_.length; ++i) {
             Asset memory a = assets_[i];
@@ -137,7 +147,7 @@ contract IndexVault is ERC20, ReentrancyGuard {
 
     /// @dev allow max -> body -> allow zero -> require the vault balanced with at most the incentive gone.
     modifier lending(uint256[] calldata assetIds) {
-        uint256 minNav = _minNavAfter();
+        (uint256 navBefore, uint256 minNav) = _minNavAfter();
         for (uint256 i; i < assetIds.length; ++i) {
             assets[assetIds[i]].token.forceApprove(msg.sender, type(uint256).max);
         }
@@ -145,7 +155,7 @@ contract IndexVault is ERC20, ReentrancyGuard {
         for (uint256 i; i < assetIds.length; ++i) {
             assets[assetIds[i]].token.forceApprove(msg.sender, 0);
         }
-        _requireBalanced(minNav);
+        _requireBalanced(navBefore, minNav);
     }
 
     /// @notice Rebalance the vault your own way. While `onRebalance(data)` runs on the caller, the caller holds
@@ -180,26 +190,32 @@ contract IndexVault is ERC20, ReentrancyGuard {
 
     // ──────────────────────────────────────────── internals ────────────────────────────────────────────
 
-    /// @dev Requires the configured block interval since the last rebalance and the drift threshold to be met,
-    ///      and returns the lowest NAV a rebalance may leave behind: current NAV minus the configured incentive
-    ///      share of the value sitting above target.
-    function _minNavAfter() private view returns (uint256) {
+    /// @dev Requires the configured block interval since the last rebalance and the drift threshold to be met.
+    ///      Returns the current NAV and the lowest NAV a rebalance may leave behind. Holders pay at most
+    ///      `incentiveBps` of the misplaced value; that budget is split so the creator's cut is `creatorShareBps`
+    ///      of what the rebalancer keeps, hence the rebalancer's own ceiling is incentive / (1 + creatorShare).
+    function _minNavAfter() private view returns (uint256 nav, uint256 minNav) {
         if (lastRebalanceBlock != 0 && block.number < lastRebalanceBlock + config.rebalanceInterval()) {
             revert TooSoon();
         }
-        (uint256[] memory vals, uint256 nav) = snapshot();
+        uint256[] memory vals;
+        (vals, nav) = snapshot();
         (uint256 maxBps, uint256 misplaced) = _gaps(vals, nav);
         if (maxBps < config.thresholdBps()) revert BelowThreshold();
-        return nav - misplaced * config.incentiveBps() / BPS;
+        minNav = nav - misplaced * config.incentiveBps() / (BPS + config.creatorShareBps());
     }
 
-    /// @dev Reverts unless every asset is within 0.01% of NAV of its target and NAV is at least `minNav`.
-    function _requireBalanced(uint256 minNav) private {
+    /// @dev Reverts unless every asset is within 0.01% of NAV of its target and NAV is at least `minNav`; then
+    ///      mints the creator INDEX worth `creatorShareBps` of what the rebalancer actually kept.
+    function _requireBalanced(uint256 navBefore, uint256 minNav) private {
         (uint256[] memory vals, uint256 nav) = snapshot();
         (uint256 maxBps,) = _gaps(vals, nav);
         if (nav < minNav || maxBps != 0) revert OffTarget();
+        uint256 taken = navBefore > nav ? navBefore - nav : 0;
+        uint256 creatorShares = totalSupply() * (taken * config.creatorShareBps() / BPS) / nav;
+        if (creatorShares > 0) _mint(creator, creatorShares);
         lastRebalanceBlock = block.number;
-        emit Rebalanced(msg.sender, nav);
+        emit Rebalanced(msg.sender, nav, creatorShares);
     }
 
     /// @dev Largest gap from target in basis points of NAV, and the total value sitting above target.

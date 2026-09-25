@@ -123,3 +123,48 @@ p { line-height: 1.6; }
 .docs pre { background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; overflow-x: auto; font-size: .85rem; }
 .docs table { margin: 12px 0; }
 .small { font-size: .85rem; }
+
+/* ---- landing v2 ---- */
+.hero2 { position: relative; padding: 80px 0 40px; overflow: hidden; }
+.hero2::before { content: ""; position: absolute; inset: -20% -10% auto -10%; height: 70%; background: radial-gradient(60% 60% at 30% 30%, rgba(245, 185, 66, .16), transparent 70%), radial-gradient(40% 50% at 80% 20%, rgba(94, 227, 161, .12), transparent 70%); pointer-events: none; }
+.hero2 .container { position: relative; display: grid; grid-template-columns: 1.1fr .9fr; gap: 48px; align-items: center; }
+@media (max-width: 900px) { .hero2 .container { grid-template-columns: 1fr; } }
+.hero2 h1 { font-size: clamp(2.4rem, 5.6vw, 4rem); }
+.hero2 h1 .glow { background: linear-gradient(90deg, #ffd27a, #f5b942 40%, #5ee3a1); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero2 .lead { font-size: 1.15rem; color: var(--muted); max-width: 560px; }
+.flag { background: linear-gradient(180deg, #171e2a, #121821); border: 1px solid #2a3648; border-radius: 20px; padding: 22px; box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+.flag .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.flag .name { font-weight: 800; font-size: 1.25rem; }
+.flag .big { font-family: var(--mono); font-size: 2.2rem; font-weight: 600; margin: 14px 0 2px; letter-spacing: -0.02em; }
+.flag .sub { color: var(--muted); font-size: .9rem; }
+.comp { margin-top: 18px; display: grid; gap: 8px; }
+.comp .r { display: grid; grid-template-columns: 58px 1fr 48px; gap: 10px; align-items: center; font-size: .85rem; }
+.comp .r .sym { font-family: var(--mono); font-weight: 700; }
+.comp .r .pct { text-align: right; font-family: var(--mono); color: var(--muted); }
+.comp .track { height: 8px; background: var(--bg-2); border-radius: 999px; overflow: hidden; }
+.comp .track > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #f5b942, #ffd27a); }
+.flag .cta { margin-top: 18px; display: flex; gap: 10px; }
+.outcomes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+@media (max-width: 860px) { .outcomes { grid-template-columns: 1fr; } }
+.outcome { padding: 22px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); }
+.outcome .k { font-family: var(--mono); color: var(--accent); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
+.outcome h3 { margin: 8px 0 6px; font-size: 1.15rem; }
+.outcome p { margin: 0; color: var(--muted); }
+.create-cta { margin: 64px 0 40px; padding: 36px; border-radius: 22px; background: linear-gradient(135deg, #171e2a, #10151d); border: 1px solid #2a3648; display: grid; grid-template-columns: 1.2fr .8fr; gap: 28px; align-items: center; }
+@media (max-width: 860px) { .create-cta { grid-template-columns: 1fr; } }
+.create-cta h2 { margin-bottom: 8px; }
+.steps { display: grid; gap: 10px; }
+.steps .s { display: flex; gap: 12px; align-items: baseline; color: var(--muted); }
+.steps .s b { color: var(--accent); font-family: var(--mono); }
+/* create page */
+.picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (max-width: 700px) { .picker { grid-template-columns: 1fr; } }
+.pick { display: grid; grid-template-columns: auto 1fr auto 92px; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2); }
+.pick.on { border-color: #3a4a60; background: var(--surface-2); }
+.pick input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+.pick .price { color: var(--muted); font-family: var(--mono); font-size: .85rem; }
+.pick .weight { display: flex; align-items: center; gap: 4px; }
+.pick .weight input { width: 56px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 8px; font-family: var(--mono); text-align: right; }
+.sum { font-family: var(--mono); }
+.sum.bad { color: var(--bad); }
+.sum.ok { color: var(--good); }

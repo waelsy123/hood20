@@ -62,7 +62,7 @@ contract GasTest is Test {
             uint256 target = nav * 1_000 / 10_000;
             if (vals[i] > target) misplaced += vals[i] - target;
         }
-        uint256 navAfter = nav - misplaced * config.incentiveBps() / 10_000;
+        uint256 navAfter = nav - misplaced * config.incentiveBps() / (10_000 + config.creatorShareBps());
         (pulls, pushes) = (new uint256[](N), new uint256[](N));
         for (uint256 i; i < N; ++i) {
             uint256 target = navAfter * 1_000 / 10_000;

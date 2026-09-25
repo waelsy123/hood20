@@ -1,42 +1,41 @@
 import { parseUnits, type Address } from "viem";
-import type { AssetInfo, ConfigInfo, Position, Source, TxResult, VaultInfo } from "./types";
-import { depositAmounts, redeemAmounts, gaps, WAD } from "./math";
+import type { AssetInfo, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
+import { depositAmounts, redeemAmounts, gaps } from "./math";
 import { CHAIN } from "../config";
 
 export const DEMO_USER: Address = "0xD3110000000000000000000000000000000000d0";
 const CONFIG_ADDR: Address = "0xC0DF000000000000000000000000000000000001";
+const TEAM: Address = "0x7EA0000000000000000000000000000000000001";
 
-type Tok = { symbol: string; name: string; decimals: number; price: number; token: Address; valuer: Address };
-const tok = (symbol: string, name: string, price: number, i: number): Tok => ({
-  symbol,
-  name,
-  decimals: 18,
-  price,
-  token: `0x${(0xa0 + i).toString(16).padStart(2, "0")}${"0".repeat(36)}0${i}` as Address,
-  valuer: `0x${(0xb0 + i).toString(16).padStart(2, "0")}${"0".repeat(36)}0${i}` as Address,
-});
-const T = {
-  WETH: tok("WETH", "Wrapped Ether", 2662, 1),
-  AAPL: tok("AAPL", "Apple (Robinhood Stock Token)", 338.1, 2),
-  NVDA: tok("NVDA", "NVIDIA (Robinhood Stock Token)", 185.4, 3),
-  MSFT: tok("MSFT", "Microsoft (Robinhood Stock Token)", 522.7, 4),
-  GOOG: tok("GOOG", "Alphabet (Robinhood Stock Token)", 251.3, 5),
-  AMZN: tok("AMZN", "Amazon (Robinhood Stock Token)", 228.9, 6),
-};
+const addr = (prefix: number, i: number): Address => `0x${prefix.toString(16).padStart(2, "0")}${"0".repeat(36)}${i.toString(16).padStart(2, "0")}` as Address;
 
-function asset(t: Tok, weightBps: number, wholeUnits: number): AssetInfo {
-  const balance = parseUnits(wholeUnits.toString(), t.decimals);
-  const unitValue = parseUnits(t.price.toString(), 18);
+/** Demo catalog with today's prices; the on-chain catalog lives in config.ts. */
+const CATALOG: (CuratedAsset & { price: number })[] = [
+  { key: "SPY", symbol: "SPY", name: "S&P 500 ETF (Robinhood Stock Token)", price: 662.4, decimals: 18, token: addr(0xa0, 1), valuer: addr(0xb0, 1), unitValue: 0n },
+  { key: "NVDA", symbol: "NVDA", name: "NVIDIA (Robinhood Stock Token)", price: 185.4, decimals: 18, token: addr(0xa0, 2), valuer: addr(0xb0, 2), unitValue: 0n },
+  { key: "AAPL", symbol: "AAPL", name: "Apple (Robinhood Stock Token)", price: 338.1, decimals: 18, token: addr(0xa0, 3), valuer: addr(0xb0, 3), unitValue: 0n },
+  { key: "MSFT", symbol: "MSFT", name: "Microsoft (Robinhood Stock Token)", price: 522.7, decimals: 18, token: addr(0xa0, 4), valuer: addr(0xb0, 4), unitValue: 0n },
+  { key: "AMZN", symbol: "AMZN", name: "Amazon (Robinhood Stock Token)", price: 228.9, decimals: 18, token: addr(0xa0, 5), valuer: addr(0xb0, 5), unitValue: 0n },
+  { key: "GOOG", symbol: "GOOG", name: "Alphabet (Robinhood Stock Token)", price: 251.3, decimals: 18, token: addr(0xa0, 6), valuer: addr(0xb0, 6), unitValue: 0n },
+  { key: "TSLA", symbol: "TSLA", name: "Tesla (Robinhood Stock Token)", price: 431.2, decimals: 18, token: addr(0xa0, 7), valuer: addr(0xb0, 7), unitValue: 0n },
+  { key: "WETH", symbol: "WETH", name: "Wrapped Ether", price: 2662, decimals: 18, token: addr(0xa0, 8), valuer: addr(0xb0, 8), unitValue: 0n },
+].map((a) => ({ ...a, unitValue: parseUnits(a.price.toString(), 18) }));
+
+const byKey = (k: string) => CATALOG.find((a) => a.key === k)!;
+
+function holding(key: string, weightBps: number, wholeUnits: number): AssetInfo {
+  const a = byKey(key);
+  const balance = parseUnits(wholeUnits.toString(), a.decimals);
   return {
-    token: t.token,
-    valuer: t.valuer,
+    token: a.token,
+    valuer: a.valuer,
     weightBps,
-    symbol: t.symbol,
-    name: t.name,
-    decimals: t.decimals,
+    symbol: a.symbol,
+    name: a.name,
+    decimals: a.decimals,
     balance,
-    value: (balance * unitValue) / 10n ** BigInt(t.decimals),
-    unitValue,
+    value: (balance * a.unitValue) / 10n ** BigInt(a.decimals),
+    unitValue: a.unitValue,
   };
 }
 
@@ -60,6 +59,7 @@ class World {
     owner: "0x0000000000000000000000000000000000000ADD",
     thresholdBps: 50,
     incentiveBps: 50,
+    creatorShareBps: 1_000,
     rebalanceInterval: 18_000,
     redeemFeeBps: 0,
     feeRecipient: "0x0000000000000000000000000000000000000000",
@@ -67,32 +67,19 @@ class World {
   vaults: VaultInfo[] = [
     withNav({
       address: "0x20A0000000000000000000000000000000000001",
-      name: "hood20 Core 50/50",
+      creator: TEAM,
+      name: "hood20 Core",
       symbol: "h20CORE",
-      totalSupply: parseUnits("650000", 18),
-      lastRebalanceBlock: START_BLOCK - 25_000n,
-      assets: [asset(T.WETH, 5000, 130), asset(T.AAPL, 5000, 940)],
-    }),
-    withNav({
-      address: "0x20A0000000000000000000000000000000000002",
-      name: "hood20 Mag 5",
-      symbol: "h20MAG5",
-      totalSupply: parseUnits("500000", 18),
-      lastRebalanceBlock: START_BLOCK - 3_000n,
-      assets: [
-        asset(T.NVDA, 2000, 540),
-        asset(T.AAPL, 2000, 296),
-        asset(T.MSFT, 2000, 191),
-        asset(T.GOOG, 2000, 398),
-        asset(T.AMZN, 2000, 437),
-      ],
+      totalSupply: parseUnits("1200000", 18),
+      lastRebalanceBlock: START_BLOCK - 21_000n,
+      // ~$1.2M: SPY 30 / NVDA 20 / AAPL 15 / MSFT 15 / AMZN 10 / GOOG 10, NVDA slightly rich after a good day
+      assets: [holding("SPY", 3000, 543), holding("NVDA", 2000, 1_312), holding("AAPL", 1500, 532), holding("MSFT", 1500, 344), holding("AMZN", 1000, 524), holding("GOOG", 1000, 477)],
     }),
   ];
-  shares = new Map<string, bigint>([[this.vaults[0].address, parseUnits("12500", 18)]]);
-  wallet = new Map<string, bigint>(
-    Object.values(T).map((t) => [t.token, parseUnits({ WETH: "5", AAPL: "40", NVDA: "30", MSFT: "10", GOOG: "25", AMZN: "25" }[t.symbol] ?? "0", 18)]),
-  );
+  shares = new Map<string, bigint>([[this.vaults[0].address, parseUnits("25000", 18)]]);
+  wallet = new Map<string, bigint>(CATALOG.map((a) => [a.token, parseUnits({ SPY: "30", NVDA: "120", AAPL: "60", MSFT: "40", AMZN: "90", GOOG: "80", TSLA: "50", WETH: "8" }[a.key] ?? "0", 18)]));
   allowances = new Map<string, bigint>();
+  nextVault = 2;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -131,7 +118,6 @@ export class MockSource implements Source {
   async deposit(vault: VaultInfo, maxAmounts: bigint[], minShares: bigint): Promise<TxResult> {
     await sleep(900);
     const v = this.w.vaults.find((x) => x.address === vault.address)!;
-    // shares = min_i(maxAmounts[i] * supply / balance_i), then amounts = ceil(shares * balance_i / supply)
     let shares = maxAmounts.reduce((m, a, i) => {
       const s = (a * v.totalSupply) / v.assets[i].balance;
       return s < m ? s : m;
@@ -172,6 +158,26 @@ export class MockSource implements Source {
     this.w.shares.set(v.address, have - shares);
     return { hash: hash() };
   }
+  async listAssets(): Promise<CuratedAsset[]> {
+    return CATALOG.map(({ price: _p, ...a }) => ({ ...a }));
+  }
+  async walletBalances(assets: CuratedAsset[], _user: Address): Promise<bigint[]> {
+    return assets.map((a) => this.w.wallet.get(a.token) ?? 0n);
+  }
+  async createVault(input: CreateInput, user: Address): Promise<TxResult & { vault: Address }> {
+    await sleep(1200);
+    const assets: AssetInfo[] = input.picks.map(({ asset, weightBps }, i) => {
+      const amt = input.seedAmounts[i];
+      const bal = this.w.wallet.get(asset.token) ?? 0n;
+      if (bal < amt) throw new Error(`Insufficient ${asset.symbol} balance`);
+      this.w.wallet.set(asset.token, bal - amt);
+      return { ...asset, weightBps, balance: amt, value: (amt * asset.unitValue) / 10n ** BigInt(asset.decimals) };
+    });
+    const address = addr(0x20, this.w.nextVault++);
+    const v = withNav({ address, creator: user, name: input.name, symbol: input.symbol, totalSupply: 0n, lastRebalanceBlock: 0n, assets });
+    v.totalSupply = v.nav; // first deposit: 1 INDEX per USD
+    this.w.vaults.push(v);
+    this.w.shares.set(address, v.totalSupply);
+    return { hash: hash(), vault: address };
+  }
 }
-
-export const DEMO_ONE_USD = WAD;

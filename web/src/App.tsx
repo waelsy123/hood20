@@ -3,6 +3,7 @@ import { Link, usePath } from "./lib/router";
 import { Landing } from "./pages/Landing";
 import { Vaults } from "./pages/Vaults";
 import { Vault } from "./pages/Vault";
+import { Create } from "./pages/Create";
 import { Docs } from "./pages/Docs";
 import { MOCK, LINKS } from "./config";
 import { short } from "./lib/format";
@@ -20,7 +21,8 @@ function Header() {
           hood20
         </Link>
         <nav className="nav">
-          <Link to="/app" className={is("/app") ? "active" : ""}>App</Link>
+          <Link to="/app" className={is("/app") ? "active" : ""}>Vaults</Link>
+          <Link to="/create" className={is("/create") ? "active" : ""}>Create</Link>
           <Link to="/docs" className={is("/docs") ? "active" : ""}>Docs</Link>
         </nav>
         <div className="spacer" />
@@ -58,6 +60,7 @@ function Routes() {
   const path = usePath();
   if (path === "/") return <Landing />;
   if (path === "/docs") return <Docs />;
+  if (path === "/create") return <Create />;
   if (path === "/app" || path === "/app/") return <Vaults />;
   const m = path.match(/^\/app\/vault\/(0x[0-9a-fA-F]{40})$/);
   if (m) return <Vault address={m[1] as `0x${string}`} />;

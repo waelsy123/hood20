@@ -1,7 +1,7 @@
 import { createPublicClient, createWalletClient, custom, defineChain, http, type Address, type WalletClient } from "viem";
-import { ADDRESSES, CHAIN } from "../config";
+import { ADDRESSES, CHAIN, CURATED_ASSETS } from "../config";
 import { ChainlinkAdapterAbi, IndexConfigAbi, IndexVaultAbi, IndexVaultFactoryAbi, erc20Abi } from "../abi";
-import type { ConfigInfo, Position, Source, TxResult, VaultInfo } from "./types";
+import type { ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
 
 export const robinhoodChain = defineChain({
   id: CHAIN.id,
@@ -41,10 +41,11 @@ export class ChainSource implements Source {
 
   async getConfig(): Promise<ConfigInfo> {
     const c = { address: ADDRESSES.config, abi: IndexConfigAbi } as const;
-    const [owner, thresholdBps, incentiveBps, rebalanceInterval, redeemFeeBps, feeRecipient] = await Promise.all([
+    const [owner, thresholdBps, incentiveBps, creatorShareBps, rebalanceInterval, redeemFeeBps, feeRecipient] = await Promise.all([
       publicClient.readContract({ ...c, functionName: "owner" }),
       publicClient.readContract({ ...c, functionName: "thresholdBps" }),
       publicClient.readContract({ ...c, functionName: "incentiveBps" }),
+      publicClient.readContract({ ...c, functionName: "creatorShareBps" }),
       publicClient.readContract({ ...c, functionName: "rebalanceInterval" }),
       publicClient.readContract({ ...c, functionName: "redeemFeeBps" }),
       publicClient.readContract({ ...c, functionName: "feeRecipient" }),
@@ -54,6 +55,7 @@ export class ChainSource implements Source {
       owner,
       thresholdBps: Number(thresholdBps),
       incentiveBps: Number(incentiveBps),
+      creatorShareBps: Number(creatorShareBps),
       rebalanceInterval: Number(rebalanceInterval),
       redeemFeeBps: Number(redeemFeeBps),
       feeRecipient,
@@ -67,7 +69,7 @@ export class ChainSource implements Source {
 
   async getVault(address: Address): Promise<VaultInfo> {
     const v = { address, abi: IndexVaultAbi } as const;
-    const [name, symbol, totalSupply, count, snap, deviationBps, lastRebalanceBlock] = await Promise.all([
+    const [name, symbol, totalSupply, count, snap, deviationBps, lastRebalanceBlock, creator] = await Promise.all([
       publicClient.readContract({ ...v, functionName: "name" }),
       publicClient.readContract({ ...v, functionName: "symbol" }),
       publicClient.readContract({ ...v, functionName: "totalSupply" }),
@@ -75,6 +77,7 @@ export class ChainSource implements Source {
       publicClient.readContract({ ...v, functionName: "snapshot" }),
       publicClient.readContract({ ...v, functionName: "deviationBps" }),
       publicClient.readContract({ ...v, functionName: "lastRebalanceBlock" }),
+      publicClient.readContract({ ...v, functionName: "creator" }),
     ]);
     const [vals, nav] = snap;
     const raw = await Promise.all(
@@ -93,7 +96,37 @@ export class ChainSource implements Source {
         return { token, valuer, weightBps: Number(weightBps), symbol: sym, name: nm, decimals: dec, balance, value: vals[i], unitValue };
       }),
     );
-    return { address, name, symbol, totalSupply, nav, deviationBps: Number(deviationBps), lastRebalanceBlock, assets };
+    return { address, creator, name, symbol, totalSupply, nav, deviationBps: Number(deviationBps), lastRebalanceBlock, assets };
+  }
+
+  async listAssets(): Promise<CuratedAsset[]> {
+    return Promise.all(
+      CURATED_ASSETS.map(async (a) => ({
+        ...a,
+        unitValue: await publicClient.readContract({ address: a.valuer, abi: ChainlinkAdapterAbi, functionName: "valueOf", args: [10n ** BigInt(a.decimals)] }),
+      })),
+    );
+  }
+
+  walletBalances(assets: CuratedAsset[], user: Address) {
+    return Promise.all(assets.map((a) => publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "balanceOf", args: [user] })));
+  }
+
+  async createVault(input: CreateInput, user: Address): Promise<TxResult & { vault: Address }> {
+    const wc = wallet();
+    for (let i = 0; i < input.picks.length; i++) {
+      const a = input.picks[i].asset;
+      const allowance = await publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "allowance", args: [user, ADDRESSES.factory] });
+      if (allowance < input.seedAmounts[i]) {
+        const h = await wc.writeContract({ account: user, chain: robinhoodChain, address: a.token, abi: erc20Abi, functionName: "approve", args: [ADDRESSES.factory, input.seedAmounts[i]] });
+        await publicClient.waitForTransactionReceipt({ hash: h });
+      }
+    }
+    const assets = input.picks.map((p) => ({ token: p.asset.token, valuer: p.asset.valuer, weightBps: BigInt(p.weightBps) }));
+    const hash = await wc.writeContract({ account: user, chain: robinhoodChain, address: ADDRESSES.factory, abi: IndexVaultFactoryAbi, functionName: "create", args: [input.name, input.symbol, assets, input.seedAmounts] });
+    await publicClient.waitForTransactionReceipt({ hash });
+    const all = await publicClient.readContract({ address: ADDRESSES.factory, abi: IndexVaultFactoryAbi, functionName: "all" });
+    return { hash, vault: all[all.length - 1] };
   }
 
   async getPosition(vault: VaultInfo, user: Address): Promise<Position> {
