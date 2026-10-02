@@ -60,6 +60,14 @@ push_i   = ceil((target_i - value_i) / price_i)    // underweight assets`}</pre>
         <li>Deposits and redemptions never touch an oracle, so nobody can mint against a stale price.</li>
       </ul>
 
+      <h2 id="zap">Buying with USDG</h2>
+      <p>
+        Vaults only take pro-rata deposits of every constituent, so a stateless <code>Zap</code> contract does the conversion in one call: it pulls
+        USDG (Permit2 signature or allowance), swaps into each asset through routers the config owner allowlists, deposits what it received,
+        sends you the shares and refunds any dust. <code>zapOut</code> does the reverse. It never holds funds between transactions and can only ever
+        move the caller's own.
+      </p>
+
       <h2 id="config">Shared config</h2>
       <p>One owner-managed contract, read live by every vault, with hard caps so users know the worst case up front.</p>
       <div className="table-wrap">

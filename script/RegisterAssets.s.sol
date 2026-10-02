@@ -27,7 +27,12 @@ contract RegisterAssets is Script {
             address feed = vm.parseJsonAddress(json, string.concat(base, ".proxy"));
             address current = address(config.valuerOf(token));
             address adapter = address(config.registerAsset(IERC20Metadata(token), IAggregatorV3(feed), maxStale));
-            console.log(vm.parseJsonString(json, string.concat(base, ".symbol")), token, adapter, current == adapter ? "(unchanged)" : "");
+            console.log(
+                vm.parseJsonString(json, string.concat(base, ".symbol")),
+                token,
+                adapter,
+                current == adapter ? "(unchanged)" : ""
+            );
         }
         vm.stopBroadcast();
     }

@@ -163,6 +163,19 @@ Chainlink risk tier, market hours) merged with Robinhood's stock-token registry 
 multiplier, trading status), each checked live on-chain (price, last update, aggregator match, token symbol).
 Regenerate with `cd web && node scripts/feeds.mjs`; the dapp's curated catalog reads token and feed addresses from it.
 
+## Zap: one call from USDG into an index, and back
+
+[`src/Zap.sol`](src/Zap.sol) is a stateless periphery contract with no owner. `zapIn(vault, tokenIn, amountIn, permit,
+swaps, minShares, deadline)` pulls the input token (Permit2 signature transfer, or a plain allowance when the
+signature is empty), runs each swap as caller-supplied calldata against a router the config owner has allowlisted
+(`IndexConfig.setRouter`), approving the router for exactly the stated input and revoking afterwards, then deposits
+every vault asset it now holds, sends the shares to the caller and refunds all leftovers in the same transaction.
+`zapOut` mirrors it: pull shares, redeem, sell each asset along the given swaps, pay at least `minOut` of the output
+token, refund dust. The caller only ever moves their own funds: the zap never delegatecalls, holds nothing between
+transactions, and routers are paid from its transient balance, so nobody can reach another user's allowance through
+it. Swap calldata comes from an aggregator quote (0x, 1inch) or a Uniswap router call; Permit2 is live at its
+canonical address on Robinhood Chain.
+
 ## Gas (10-asset vault)
 
 | Call | Gas | USD today |
@@ -189,7 +202,7 @@ the ABIs from the Forge artifacts so the dapp can never drift from the contracts
 
 ```sh
 forge build
-forge test -vv          # 27 tests incl. two fuzz properties (1,000 runs each)
+forge test -vv          # 31 tests incl. two fuzz properties (1,000 runs each)
 forge fmt --check
 slither .               # optional static analysis
 ```
@@ -201,6 +214,7 @@ cp .env.example .env    # OWNER for the config; CONFIG to register assets; FACTO
 source .env
 forge script script/DeployFactory.s.sol --rpc-url robinhood --account <keystore-name> --broadcast   # config + factory, once
 forge script script/RegisterAssets.s.sol --rpc-url robinhood --account <keystore-name> --broadcast  # adapters for every verified feed, once
+forge script script/DeployZap.s.sol --rpc-url robinhood --account <keystore-name> --broadcast       # zap + router allowlist, once
 forge script script/CreateVault.s.sol --rpc-url robinhood --account <keystore-name> --broadcast     # one seeded vault
 ```
 
