@@ -65,6 +65,7 @@ class World {
     rebalanceInterval: 18_000,
     redeemFeeBps: 0,
     feeRecipient: "0x0000000000000000000000000000000000000000",
+    pendingOwner: "0x0000000000000000000000000000000000000000",
   };
   vaults: VaultInfo[] = [
     withNav({
@@ -170,6 +171,9 @@ export class MockSource implements Source {
   }
   async usdgBalance(_user: Address) {
     return this.w.usdg;
+  }
+  async acceptConfigOwnership(_user: Address): Promise<TxResult> {
+    throw new Error("No ownership transfer is pending in demo mode");
   }
   /** Demo "Uniswap": fills at the Chainlink price plus 30 bps, with the same 0.5% maximum as the real quotes. */
   async quoteBuy(vault: VaultInfo, legs: bigint[], _user: Address): Promise<BuyQuote> {

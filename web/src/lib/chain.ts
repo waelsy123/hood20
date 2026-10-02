@@ -42,7 +42,7 @@ export class ChainSource implements Source {
 
   async getConfig(): Promise<ConfigInfo> {
     const c = { address: ADDRESSES.config, abi: IndexConfigAbi } as const;
-    const [owner, thresholdBps, incentiveBps, creatorShareBps, rebalanceInterval, redeemFeeBps, feeRecipient] = await Promise.all([
+    const [owner, thresholdBps, incentiveBps, creatorShareBps, rebalanceInterval, redeemFeeBps, feeRecipient, pendingOwner] = await Promise.all([
       publicClient.readContract({ ...c, functionName: "owner" }),
       publicClient.readContract({ ...c, functionName: "thresholdBps" }),
       publicClient.readContract({ ...c, functionName: "incentiveBps" }),
@@ -50,6 +50,7 @@ export class ChainSource implements Source {
       publicClient.readContract({ ...c, functionName: "rebalanceInterval" }),
       publicClient.readContract({ ...c, functionName: "redeemFeeBps" }),
       publicClient.readContract({ ...c, functionName: "feeRecipient" }),
+      publicClient.readContract({ ...c, functionName: "pendingOwner" }),
     ]);
     return {
       address: ADDRESSES.config,
@@ -60,7 +61,12 @@ export class ChainSource implements Source {
       rebalanceInterval: Number(rebalanceInterval),
       redeemFeeBps: Number(redeemFeeBps),
       feeRecipient,
+      pendingOwner,
     };
+  }
+
+  acceptConfigOwnership(user: Address) {
+    return send(user, () => wallet().writeContract({ account: user, chain: robinhoodChain, address: ADDRESSES.config, abi: IndexConfigAbi, functionName: "acceptOwnership" }));
   }
 
   async listVaults(): Promise<VaultInfo[]> {

@@ -225,6 +225,17 @@ forge fmt --check
 slither .               # optional static analysis
 ```
 
+## Deployed on Robinhood Chain (chain id 4663)
+
+| Contract | Address |
+|---|---|
+| IndexConfig (owner: `0x3FB9…3D58`) | [`0x543A25b213ABa3aCce7747B392273a4751B5D297`](https://robin.etherscan.io/address/0x543A25b213ABa3aCce7747B392273a4751B5D297) |
+| IndexVaultFactory | [`0x0a9c469B0f56EDb6a7d67bDB71a76567F6cae2B1`](https://robin.etherscan.io/address/0x0a9c469B0f56EDb6a7d67bDB71a76567F6cae2B1) |
+| ChainlinkAdapter × 37 | `IndexConfig.valuerOf(token)`; e.g. AAPL `0x0B1eebaD393ed1cD762d6aAb64bD52c6cA438848` |
+
+Deployed 2026-10-02, sources verified on Etherscan. Vaults are created through the factory (dapp or
+`CreateVault.s.sol`); verify a new vault with `script/verify-etherscan.sh <vault> src/IndexVault.sol:IndexVault <args>`.
+
 ## Deploy to Robinhood Chain (chain id 4663)
 
 ```sh

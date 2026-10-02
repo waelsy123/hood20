@@ -54,6 +54,33 @@ function CreateCard() {
   );
 }
 
+/** Shown to the wallet named by a pending two-step ownership transfer of the shared config. */
+function AcceptOwnership() {
+  const { source, wallet, config, setError } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  if (!config || !wallet.address || config.pendingOwner.toLowerCase() !== wallet.address.toLowerCase()) return null;
+  const accept = async () => {
+    setBusy(true);
+    try {
+      const r = await source.acceptConfigOwnership(wallet.address!);
+      setDone(r.hash);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="row between">
+        <span>Your wallet is the pending owner of the shared config <span className="mono muted small">{config.address}</span>. Accepting completes the handover; the deployer key then owns nothing.</span>
+        {done ? <span className="muted small">accepted · {done.slice(0, 10)}…</span> : <button className="btn primary" disabled={busy} onClick={accept}>{busy ? "Accepting…" : "Accept ownership"}</button>}
+      </div>
+    </div>
+  );
+}
+
 export function Vaults() {
   const { source, setError } = useApp();
   const [vaults, setVaults] = useState<VaultInfo[] | null>(null);
@@ -76,6 +103,7 @@ export function Vaults() {
           <p className="muted" style={{ margin: 0 }}>Every vault deployed through the hood20 factory{MOCK ? " (mocked in demo mode)" : ""}.</p>
         </div>
       </div>
+      <AcceptOwnership />
       {vaults === null ? (
         <p className="muted">Loading…</p>
       ) : (

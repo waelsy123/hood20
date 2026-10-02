@@ -50,6 +50,7 @@ export type ConfigInfo = {
   rebalanceInterval: number;
   redeemFeeBps: number;
   feeRecipient: Address;
+  pendingOwner: Address; // Ownable2Step: set by transferOwnership, cleared by acceptOwnership
 };
 
 export type Position = {
@@ -78,6 +79,8 @@ export interface Source {
   walletBalances(assets: CuratedAsset[], user: Address): Promise<bigint[]>;
   createVault(input: CreateInput, user: Address): Promise<TxResult & { vault: Address }>;
   usdgBalance(user: Address): Promise<bigint>;
+  /** Completes a two-step config ownership transfer; only the pending owner can call it. */
+  acceptConfigOwnership(user: Address): Promise<TxResult>;
   /** Quotes buying `legs[i]` of asset i with USDG (0 = nothing to buy) through Uniswap's Trading API. */
   quoteBuy(vault: VaultInfo, legs: bigint[], user: Address): Promise<BuyQuote>;
   /** Re-quotes, sets the one-time Permit2 approvals if missing, and buys every leg in ONE Universal Router call. */

@@ -25,3 +25,8 @@ robinhood_testnet = "https://rpc.testnet.chain.robinhood.com"
 # unwrapped-modifier-logic: `lending` is deliberately a pre/post modifier (allow max, body, allow zero, verify).
 exclude_lints = ["screaming-snake-case-immutable", "unwrapped-modifier-logic", "asm-keccak256"]
 ignore = ["test/*", "script/*"]
+
+[etherscan]
+# Etherscan V2 covers Robinhood Chain (robin.etherscan.io); forge has no built-in URL for 4663.
+# ETHERSCAN_API_KEY=… forge verify-contract <addr> src/X.sol:X --chain 4663 --constructor-args $(cast abi-encode …) --watch
+4663 = { key = "${ETHERSCAN_API_KEY}", chain = 4663, url = "https://api.etherscan.io/v2/api" }
