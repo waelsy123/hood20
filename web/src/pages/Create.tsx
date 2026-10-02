@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { parseUnits } from "viem";
-import { MOCK, USDG, ZERO } from "../config";
+import { MOCK, USDG, ZERO, isUsdg } from "../config";
 import { useApp } from "../lib/context";
 import { amount, usd } from "../lib/format";
 import { seedAmountsFor } from "../lib/math";
@@ -46,10 +46,14 @@ export function Create() {
 
   // Seed constituents the wallet is short of are bought with USDG through Uniswap first, like a deposit.
   const legs = useMemo(() => picks.map((p, i) => {
+    if (isUsdg(p.asset.token)) return 0n; // the seed's USDG comes straight from the wallet
     const idx = catalog.indexOf(p.asset);
     const have = balances[idx] ?? 0n;
     return seedAmounts[i] > have ? seedAmounts[i] - have : 0n;
   }), [picks, seedAmounts, balances, catalog]);
+  const usdgDirect = picks.reduce((s, p, i) => (isUsdg(p.asset.token) ? s + seedAmounts[i] : s), 0n);
+  const usdgIdx = catalog.findIndex((a) => isUsdg(a.token));
+  const usdgHeld = usdgIdx >= 0 ? (balances[usdgIdx] ?? 0n) : 0n;
   const pseudoVault: VaultInfo | null = useMemo(() => (picks.length ? {
     address: ZERO, creator: ZERO, name: name || "new index", symbol: symbol || "INDEX", totalSupply: 0n, nav: 0n, deviationBps: 0, lastRebalanceBlock: 0n,
     assets: picks.map((p) => ({ token: p.asset.token, valuer: p.asset.valuer, weightBps: p.weightBps, symbol: p.asset.symbol, name: p.asset.name, decimals: p.asset.decimals, balance: 0n, value: 0n, unitValue: p.asset.unitValue })),
@@ -77,6 +81,7 @@ export function Create() {
   }, [legsKey, needsBuy, wallet.address, source, formOk]);
   const quote = bq && bq.key === legsKey ? bq.quote : null;
   const quoting = needsBuy && formOk && !!wallet.address && (!bq || bq.key !== legsKey);
+  const usdgShort = !!wallet.address && balances.length > 0 && (quote ? quote.usdgMax : 0n) + usdgDirect > usdgHeld;
 
   const toggle = (a: CuratedAsset) => {
     setWeights((w) => {
@@ -158,16 +163,23 @@ export function Create() {
             {picks.length > 0 && seed > 0n && (
               <div className="preview">
                 {picks.map((p, i) => (
-                  <div className="line" key={p.asset.key} style={{ color: shortfall[i] ? "var(--bad)" : "inherit" }}>
+                  <div className="line" key={p.asset.key} style={{ color: shortfall[i] && !legs[i] && !isUsdg(p.asset.token) ? "var(--bad)" : "inherit" }}>
                     <span>{p.asset.symbol} · {p.weightBps / 100}%</span>
-                    <span>{amount(seedAmounts[i], p.asset.decimals, 4)}</span>
+                    <span>
+                      {amount(seedAmounts[i], p.asset.decimals, 4)}
+                      {wallet.address && isUsdg(p.asset.token) ? <span className="muted"> · from your USDG</span> : wallet.address && legs[i] > 0n ? <span className="muted"> · buy</span> : null}
+                    </span>
                   </div>
                 ))}
                 <div className="line muted"><span>You receive</span><span>{amount(seed, 18, 0)} {symbol.trim().toUpperCase() || "shares"}</span></div>
-                {needsBuy && wallet.address && (
-                  <div className="line">
-                    <span>Buy the shortfall</span>
-                    <span>{quote ? <>{amount(quote.usdgIn, USDG.decimals, 2)} USDG <span className="muted">(max {amount(quote.usdgMax, USDG.decimals, 2)})</span></> : bq?.error ? <span style={{ color: "var(--bad)" }}>{bq.error}</span> : "quoting…"}</span>
+                {wallet.address && (needsBuy || usdgDirect > 0n) && (
+                  <div className="line" style={{ color: usdgShort ? "var(--bad)" : "inherit" }}>
+                    <span>USDG needed</span>
+                    <span>
+                      {!needsBuy || quote ? (
+                        <>{amount((quote?.usdgIn ?? 0n) + usdgDirect, USDG.decimals, 2)} USDG <span className="muted">(max {amount((quote?.usdgMax ?? 0n) + usdgDirect, USDG.decimals, 2)} · you hold {amount(usdgHeld, USDG.decimals, 2)})</span></>
+                      ) : bq?.error ? <span style={{ color: "var(--bad)" }}>{bq.error}</span> : "quoting…"}
+                    </span>
                   </div>
                 )}
               </div>
@@ -176,7 +188,7 @@ export function Create() {
               The factory deploys the vault and makes this first deposit in the same transaction. One INDEX per dollar seeded.
               {needsBuy ? " Constituents you do not hold are bought with USDG through Uniswap first (one router transaction, two one-time approvals)." : ""}
             </p>
-            <button className="btn primary" disabled={!!wallet.address && (needsBuy ? !(formOk && quote) : !ready)} onClick={launch}>
+            <button className="btn primary" disabled={!!wallet.address && (usdgShort || (needsBuy ? !(formOk && quote) : !ready))} onClick={launch}>
               {busy ?? (wallet.address ? (needsBuy ? (quoting ? "Quoting…" : "Buy, approve & launch") : "Approve & launch") : MOCK ? "Connect demo wallet" : "Connect wallet")}
             </button>
           </div>

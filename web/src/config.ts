@@ -61,6 +61,7 @@ export const CURATED_ASSETS: CatalogEntry[] = FEEDS.filter((f) => f.kind !== "ex
 /** Global Dollar, the quote currency of the purchase flow (6 decimals; verified on-chain in the feed directory). */
 const usdgFeed = FEEDS.find((f) => f.symbol === "USDG" && f.token?.address)!;
 export const USDG = { symbol: "USDG", address: usdgFeed.token!.address as Address, decimals: usdgFeed.token!.onchain?.decimals ?? usdgFeed.token!.decimals ?? 6 };
+export const isUsdg = (token: string) => token.toLowerCase() === USDG.address.toLowerCase();
 
 /**
  * Uniswap on Robinhood Chain (Uniswap Labs deployments, github.com/Uniswap/contracts deployments/4663.md). The dapp

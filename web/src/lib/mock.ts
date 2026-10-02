@@ -1,7 +1,7 @@
 import { parseUnits, type Address } from "viem";
 import type { AssetInfo, BuyQuote, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
 import { depositAmounts, redeemAmounts, gaps, mulDivCeil } from "./math";
-import { CHAIN, CURATED_ASSETS, USDG } from "../config";
+import { CHAIN, CURATED_ASSETS, USDG, isUsdg } from "../config";
 
 export const DEMO_USER: Address = "0xD3110000000000000000000000000000000000d0";
 const CONFIG_ADDR: Address = "0xC0DF000000000000000000000000000000000001";
@@ -182,6 +182,7 @@ export class MockSource implements Source {
     legs.forEach((amt, i) => {
       if (amt === 0n) return;
       const a = vault.assets[i];
+      if (isUsdg(a.token)) return; // paid from the wallet's USDG, no swap
       const usdValue = (amt * a.unitValue) / 10n ** BigInt(a.decimals); // 18 decimals
       const usdgIn = mulDivCeil(usdValue * 10_030n, 1n, 10_000n * 10n ** BigInt(18 - USDG.decimals));
       const usdgMax = mulDivCeil(usdgIn * 10_050n, 1n, 10_000n);

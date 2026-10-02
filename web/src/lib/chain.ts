@@ -1,5 +1,5 @@
 import { createPublicClient, createWalletClient, custom, defineChain, http, type Address, type WalletClient } from "viem";
-import { ADDRESSES, CHAIN, UNISWAP, USDG } from "../config";
+import { ADDRESSES, CHAIN, UNISWAP, USDG, isUsdg } from "../config";
 import { ChainlinkAdapterAbi, IndexConfigAbi, IndexVaultAbi, IndexVaultFactoryAbi, erc20Abi } from "../abi";
 import type { BuyQuote, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
 import { MAX_UINT160, maxInput, mergeSwaps, permit2Abi, quoteExactOutput, swapTransaction, type ApiQuote } from "./uniswap";
@@ -169,7 +169,17 @@ export class ChainSource implements Source {
   }
 
   async quoteBuy(vault: VaultInfo, legs: bigint[], user: Address): Promise<BuyQuote> {
-    const raw = await Promise.all(legs.map((amt, i) => (amt > 0n ? quoteExactOutput(user, vault.assets[i].token, amt) : Promise.resolve(null))));
+    // A USDG constituent is paid from the wallet's USDG directly: nothing to swap. Other legs are quoted one by one so
+    // a failure names the asset.
+    const raw = await Promise.all(
+      legs.map((amt, i) => {
+        const a = vault.assets[i];
+        if (amt === 0n || isUsdg(a.token)) return Promise.resolve(null);
+        return quoteExactOutput(user, a.token, amt).catch((e) => {
+          throw new Error(`${a.symbol}: ${(e as Error).message}`);
+        });
+      }),
+    );
     const out: BuyQuote = { legs: [], usdgIn: 0n, usdgMax: 0n, raw };
     raw.forEach((q, i) => {
       if (!q) return;

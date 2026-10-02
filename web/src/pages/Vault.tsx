@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits, parseUnits, type Address } from "viem";
-import { CHAIN, MOCK, USDG } from "../config";
+import { CHAIN, MOCK, USDG, isUsdg } from "../config";
 import { useApp } from "../lib/context";
 import { amount, blocksToTime, pct, short, usd } from "../lib/format";
 import { depositAmounts, gaps, incentiveSplit, navPerShare, redeemAmounts, sharesForUsd, WAD } from "../lib/math";
@@ -69,7 +69,12 @@ export function Vault({ address }: { address: Address }) {
   const canDeposit = !!(v && depositNeeds && pos && sharesWanted > 0n && !shortAssets.some(Boolean) && !busy);
 
   // paying with USDG: buy only what the wallet is short of, through Uniswap, then deposit
-  const legs = useMemo(() => (depositNeeds && pos ? depositNeeds.map((n, i) => (n > pos.balances[i] ? n - pos.balances[i] : 0n)) : null), [depositNeeds, pos]);
+  const legs = useMemo(
+    () => (depositNeeds && pos && v ? depositNeeds.map((n, i) => (isUsdg(v.assets[i].token) || n <= pos.balances[i] ? 0n : n - pos.balances[i])) : null),
+    [depositNeeds, pos, v],
+  );
+  // USDG held in the index itself is pulled by the deposit straight from the wallet, on top of what the swaps spend.
+  const usdgDirect = v && depositNeeds ? depositNeeds.reduce((s, n, i) => (isUsdg(v.assets[i].token) ? s + n : s), 0n) : 0n;
   const legsKey = legs ? `${address}:${legs.join(",")}` : "";
   useEffect(() => {
     if (pay !== "usdg" || !v || !legs || !wallet.address || sharesWanted === 0n) {
@@ -96,7 +101,7 @@ export function Vault({ address }: { address: Address }) {
   }, [pay, legsKey, wallet.address, source]);
   const quoting = pay === "usdg" && !!legs && sharesWanted > 0n && (!bq || bq.key !== legsKey);
   const quote = bq && bq.key === legsKey ? bq.quote : null;
-  const usdgShort = !!(quote && usdgBal !== null && quote.usdgMax > usdgBal);
+  const usdgShort = !!(quote && usdgBal !== null && quote.usdgMax + usdgDirect > usdgBal);
   const canBuy = !!(v && legs && pos && sharesWanted > 0n && quote && !usdgShort && !busy);
 
   // redeem preview
@@ -289,7 +294,9 @@ export function Vault({ address }: { address: Address }) {
                           <span>{a.symbol}</span>
                           <span>
                             {amount(depositNeeds[i], a.decimals, 6)}
-                            {pay === "usdg" && legs && legs[i] > 0n ? (
+                            {pay === "usdg" && isUsdg(a.token) ? (
+                              <span className="muted"> · from your USDG</span>
+                            ) : pay === "usdg" && legs && legs[i] > 0n ? (
                               <span className="muted"> · buy {amount(legs[i], a.decimals, 6)}{leg ? ` for ${amount(leg.usdgIn, USDG.decimals, 2)} USDG` : quoting ? " …" : ""}</span>
                             ) : (
                               <span className="muted"> / {amount(pos.balances[i], a.decimals, 4)} held</span>
@@ -298,10 +305,10 @@ export function Vault({ address }: { address: Address }) {
                         </div>
                       );
                     })}
-                    {pay === "usdg" && quote && quote.legs.length > 0 && (
+                    {pay === "usdg" && quote && (quote.legs.length > 0 || usdgDirect > 0n) && (
                       <div className="line" style={{ color: usdgShort ? "var(--bad)" : "inherit" }}>
                         <span>Pay</span>
-                        <span>{amount(quote.usdgIn, USDG.decimals, 2)} USDG <span className="muted">(max {amount(quote.usdgMax, USDG.decimals, 2)} · you hold {usdgBal === null ? "—" : amount(usdgBal, USDG.decimals, 2)})</span></span>
+                        <span>{amount(quote.usdgIn + usdgDirect, USDG.decimals, 2)} USDG <span className="muted">(max {amount(quote.usdgMax + usdgDirect, USDG.decimals, 2)} · you hold {usdgBal === null ? "—" : amount(usdgBal, USDG.decimals, 2)})</span></span>
                       </div>
                     )}
                     {pay === "usdg" && bq?.error && bq.key === legsKey && <div className="line" style={{ color: "var(--bad)" }}><span>Uniswap</span><span>{bq.error}</span></div>}
