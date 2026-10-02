@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run abi && tsc --noEmit && vite build",
+    "build": "npm run abi && npm run check:math && tsc --noEmit && vite build",
     "preview": "vite preview",
     "abi": "node scripts/abi.mjs",
-    "preview:pages": "npm run build && npx wrangler@4 pages dev dist"
+    "preview:pages": "npm run build && npx wrangler@4 pages dev dist",
+    "check:math": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/check-math.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

@@ -32,6 +32,69 @@ export function sharesForUsd(v: VaultInfo, usd: bigint): bigint {
   return pps === 0n ? 0n : (usd * WAD) / pps;
 }
 
+/** USD (18 dec) that `shares` are worth at the current NAV per share. */
+export function usdForShares(v: VaultInfo, shares: bigint): bigint {
+  return (shares * navPerShare(v)) / WAD;
+}
+
+/** Most shares the wallet can buy with the assets it already holds: the scarcest one binds, as IndexVault does. */
+export function maxSharesFromAssets(v: VaultInfo, balances: bigint[]): bigint {
+  if (v.totalSupply === 0n) return 0n;
+  return v.assets.reduce((m, a, i) => {
+    const s = a.balance === 0n ? 0n : ((balances[i] ?? 0n) * v.totalSupply) / a.balance;
+    return s < m ? s : m;
+  }, 2n ** 255n);
+}
+
+/**
+ * USDG (raw) the purchase flow spends for `shares`: every asset the wallet is short of is bought at the oracle
+ * price with `slipBps` of headroom, and a USDG constituent is pulled from the same balance. An estimate for sizing
+ * only; Uniswap's quote is what the deposit actually pays.
+ */
+export function usdgNeededFor(
+  v: VaultInfo,
+  shares: bigint,
+  balances: bigint[],
+  usdg: { address: string; decimals: number },
+  slipBps: bigint,
+): bigint {
+  const needs = depositAmounts(v, shares);
+  const toUsdg = 10n ** BigInt(18 - usdg.decimals);
+  let buyUsd = 0n;
+  let direct = 0n;
+  v.assets.forEach((a, i) => {
+    if (a.token.toLowerCase() === usdg.address.toLowerCase()) {
+      direct += needs[i];
+      return;
+    }
+    const short = needs[i] > (balances[i] ?? 0n) ? needs[i] - (balances[i] ?? 0n) : 0n;
+    if (short > 0n) buyUsd += (short * a.unitValue) / 10n ** BigInt(a.decimals);
+  });
+  return (buyUsd * (BPS + slipBps)) / BPS / toUsdg + direct;
+}
+
+/** Most shares the wallet can buy with its USDG, spending the assets it already holds first. */
+export function maxSharesWithUsdg(
+  v: VaultInfo,
+  balances: bigint[],
+  usdgBalance: bigint,
+  usdg: { address: string; decimals: number },
+  slipBps: bigint,
+): bigint {
+  const pps = navPerShare(v);
+  if (v.totalSupply === 0n || pps === 0n) return 0n;
+  // upper bound: everything the wallet is worth, valued at NAV per share
+  const held = v.assets.reduce((s, a, i) => s + ((balances[i] ?? 0n) * a.unitValue) / 10n ** BigInt(a.decimals), 0n);
+  let lo = 0n;
+  let hi = ((usdgBalance * 10n ** BigInt(18 - usdg.decimals) + held) * WAD) / pps + 1n;
+  while (lo < hi) {
+    const mid = (lo + hi + 1n) / 2n;
+    if (usdgNeededFor(v, mid, balances, usdg, slipBps) <= usdgBalance) lo = mid;
+    else hi = mid - 1n;
+  }
+  return lo;
+}
+
 export type Gap = { target: bigint; gap: bigint; over: boolean; gapBps: number };
 
 /** Per-asset target and gap, mirroring IndexVault._gaps. */

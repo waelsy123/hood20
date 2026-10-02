@@ -3,7 +3,18 @@ import { formatUnits, parseUnits, type Address } from "viem";
 import { CHAIN, MOCK, USDG, isUsdg } from "../config";
 import { useApp } from "../lib/context";
 import { amount, blocksToTime, pct, short, usd } from "../lib/format";
-import { depositAmounts, gaps, incentiveSplit, navPerShare, redeemAmounts, sharesForUsd, WAD } from "../lib/math";
+import {
+  depositAmounts,
+  gaps,
+  incentiveSplit,
+  maxSharesFromAssets,
+  maxSharesWithUsdg,
+  navPerShare,
+  redeemAmounts,
+  sharesForUsd,
+  usdForShares,
+  WAD,
+} from "../lib/math";
 import { Link } from "../lib/router";
 import { rebalanceState } from "../lib/status";
 import type { BuyQuote, Position, VaultInfo } from "../lib/types";
@@ -20,6 +31,14 @@ function parseDecimal(s: string, decimals: number): bigint | null {
   }
 }
 
+/** An 18-decimal USD amount as input text, truncated down so it never asks for more than the wallet has. */
+function usdAmountInput(v: bigint): string {
+  const s = formatUnits(v, 18);
+  const dot = s.indexOf(".");
+  if (dot === -1) return s;
+  return s.slice(0, dot + 7).replace(/0+$/, "").replace(/\.$/, "") || "0";
+}
+
 function txLink(hash: string) {
   return MOCK ? <span className="mono muted">simulated {short(hash)}</span> : <a className="mono" href={`${CHAIN.explorer}/tx/${hash}`} target="_blank" rel="noreferrer">{short(hash)}</a>;
 }
@@ -30,6 +49,7 @@ export function Vault({ address }: { address: Address }) {
   const [pos, setPos] = useState<Position | null>(null);
   const [tab, setTab] = useState<"deposit" | "redeem">("deposit");
   const [pay, setPay] = useState<"usdg" | "assets">("usdg");
+  const [payPicked, setPayPicked] = useState(false); // once the user chooses, stop guessing for them
   const [usdIn, setUsdIn] = useState("");
   const [usdgBal, setUsdgBal] = useState<bigint | null>(null);
   const [bq, setBq] = useState<{ key: string; quote: BuyQuote | null; error: string | null } | null>(null);
@@ -68,6 +88,17 @@ export function Vault({ address }: { address: Address }) {
   const sharesWanted = v && usdWanted ? sharesForUsd(v, usdWanted) : 0n;
   const depositNeeds = v && sharesWanted > 0n ? depositAmounts(v, sharesWanted) : null;
   const shortAssets = v && depositNeeds && pos ? depositNeeds.map((n, i) => n > pos.balances[i]) : [];
+
+  // Default to the mode the wallet can actually use: deposit what it holds when it holds every constituent,
+  // buy with USDG when something is missing.
+  useEffect(() => {
+    if (payPicked || !v || !pos) return;
+    setPay(v.assets.every((_, i) => pos.balances[i] > 0n) ? "assets" : "usdg");
+  }, [v, pos, payPicked]);
+  const choosePay = (p: "usdg" | "assets") => {
+    setPay(p);
+    setPayPicked(true);
+  };
   const canDeposit = !!(v && depositNeeds && pos && sharesWanted > 0n && !shortAssets.some(Boolean) && !busy);
 
   // paying with USDG: buy only what the wallet is short of, through Uniswap, then deposit
@@ -102,6 +133,16 @@ export function Vault({ address }: { address: Address }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pay, legsKey, wallet.address, source]);
   const quoting = pay === "usdg" && !!legs && sharesWanted > 0n && (!bq || bq.key !== legsKey);
+
+  // The largest deposit this wallet can fund in the current mode, and the slider's position within it.
+  const maxShares = useMemo(() => {
+    if (!v || !pos) return 0n;
+    return pay === "assets"
+      ? maxSharesFromAssets(v, pos.balances)
+      : maxSharesWithUsdg(v, pos.balances, usdgBal ?? 0n, USDG, 150n); // 1.5% headroom for slippage and impact
+  }, [v, pos, pay, usdgBal]);
+  const maxUsd = v ? usdForShares(v, maxShares) : 0n;
+  const sliderPct = maxUsd > 0n && usdWanted ? Math.min(100, Number((usdWanted * 100n) / maxUsd)) : 0;
   const quote = bq && bq.key === legsKey ? bq.quote : null;
   const usdgShort = !!(quote && usdgBal !== null && quote.usdgMax + usdgDirect > usdgBal);
   const canBuy = !!(v && legs && pos && sharesWanted > 0n && quote && !usdgShort && !busy);
@@ -282,12 +323,28 @@ export function Vault({ address }: { address: Address }) {
             {tab === "deposit" ? (
               <>
                 <div className="field">
-                  <label>Amount to deposit</label>
-                  <div className="input"><input inputMode="decimal" placeholder="1000" value={usdIn} onChange={(e) => setUsdIn(e.target.value)} /><span className="suffix">USD</span></div>
+                  <label>
+                    Amount to deposit
+                    {wallet.address && <span className="muted"> · max {usd(maxUsd)}{pay === "usdg" ? " with your USDG" : " from what you hold"}</span>}
+                  </label>
+                  <div className="input">
+                    <input inputMode="decimal" placeholder="1000" value={usdIn} onChange={(e) => setUsdIn(e.target.value)} />
+                    <button className="btn sm" style={{ marginRight: 8 }} disabled={maxUsd === 0n} onClick={() => setUsdIn(usdAmountInput(maxUsd))}>max</button>
+                    <span className="suffix">USD</span>
+                  </div>
+                  <input
+                    className="slider"
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={sliderPct}
+                    disabled={maxUsd === 0n}
+                    onChange={(e) => setUsdIn(usdAmountInput((maxUsd * BigInt(e.target.value)) / 100n))}
+                  />
                 </div>
                 <div className="row small" style={{ gap: 14, marginBottom: 10 }}>
-                  <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "usdg"} onChange={() => setPay("usdg")} /> Pay with USDG</label>
-                  <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "assets"} onChange={() => setPay("assets")} /> Deposit the assets I hold</label>
+                  <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "usdg"} onChange={() => choosePay("usdg")} /> Pay with USDG</label>
+                  <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "assets"} onChange={() => choosePay("assets")} /> Deposit the assets I hold</label>
                 </div>
                 {depositNeeds && pos && (
                   <div className="preview">

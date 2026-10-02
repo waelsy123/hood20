@@ -175,3 +175,7 @@ p { line-height: 1.6; }
 .create-card .title { display: block; font-weight: 700; font-size: 1.15rem; margin-bottom: 4px; }
 .create-card:hover { border-color: var(--accent); text-decoration: none; }
 @media (max-width: 640px) { .create-card { grid-template-columns: auto 1fr; } .create-card .btn { grid-column: 1 / -1; } }
+
+/* deposit/redeem amount slider */
+.slider { width: 100%; margin: 10px 0 0; accent-color: var(--accent); background: transparent; cursor: pointer; }
+.slider:disabled { opacity: .4; cursor: not-allowed; }
