@@ -60,6 +60,10 @@ export type Position = {
 
 export type TxResult = { hash: string };
 
+/** One constituent bought with USDG through Uniswap: exact output, USDG in (expected and the max after slippage). */
+export type LegQuote = { index: number; amountOut: bigint; usdgIn: bigint; usdgMax: bigint; routing: string };
+export type BuyQuote = { legs: LegQuote[]; usdgIn: bigint; usdgMax: bigint; raw: unknown[] };
+
 export interface Source {
   readonly mock: boolean;
   blockNumber(): Promise<bigint>;
@@ -73,4 +77,9 @@ export interface Source {
   listAssets(): Promise<CuratedAsset[]>;
   walletBalances(assets: CuratedAsset[], user: Address): Promise<bigint[]>;
   createVault(input: CreateInput, user: Address): Promise<TxResult & { vault: Address }>;
+  usdgBalance(user: Address): Promise<bigint>;
+  /** Quotes buying `legs[i]` of asset i with USDG (0 = nothing to buy) through Uniswap's Trading API. */
+  quoteBuy(vault: VaultInfo, legs: bigint[], user: Address): Promise<BuyQuote>;
+  /** Re-quotes, sets the one-time Permit2 approvals if missing, and buys every leg in ONE Universal Router call. */
+  buy(vault: VaultInfo, legs: bigint[], user: Address, onStep: (label: string) => void): Promise<TxResult & { quote: BuyQuote }>;
 }

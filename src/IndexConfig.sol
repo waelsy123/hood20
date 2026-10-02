@@ -32,8 +32,6 @@ contract IndexConfig is Ownable2Step {
     mapping(address token => IValuer) public valuerOf;
     /// @notice Every token ever registered, for discovery (check `valuerOf` for the current valuer).
     address[] public registered;
-    /// @notice DEX routers the Zap may call with caller-supplied calldata.
-    mapping(address router => bool) public isRouter;
 
     event ConfigSet(
         uint256 thresholdBps,
@@ -45,7 +43,6 @@ contract IndexConfig is Ownable2Step {
     );
 
     event AssetRegistered(address indexed token, address indexed valuer, address feed, uint256 maxStale);
-    event RouterSet(address indexed router, bool allowed);
 
     error OutOfRange();
 
@@ -86,12 +83,6 @@ contract IndexConfig is Ownable2Step {
         if (address(valuerOf[address(token)]) == address(0)) registered.push(address(token));
         valuerOf[address(token)] = adapter;
         emit AssetRegistered(address(token), address(adapter), address(feed), maxStale);
-    }
-
-    /// @notice Allow or disallow a DEX router for the Zap.
-    function setRouter(address router, bool allowed) external onlyOwner {
-        isRouter[router] = allowed;
-        emit RouterSet(router, allowed);
     }
 
     function registeredAssets() external view returns (address[] memory) {

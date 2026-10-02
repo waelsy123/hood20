@@ -196,6 +196,48 @@ contract IndexVault is ERC20, ReentrancyGuard {
         (maxBps,) = _gaps(vals, nav);
     }
 
+    /// @notice What `deposit` pulls of every asset for exactly `shares` at the current balances (rounded up), i.e.
+    ///         what a depositor must hold and approve. All zero while the vault is empty: the first deposit sets the
+    ///         mix and is priced by the valuers instead.
+    function previewDeposit(uint256 shares) external view returns (uint256[] memory amounts) {
+        uint256 n = assets.length;
+        uint256 supply = totalSupply();
+        amounts = new uint256[](n);
+        if (supply == 0) return amounts;
+        for (uint256 i; i < n; ++i) {
+            amounts[i] = Math.mulDiv(shares, _balance(assets[i]), supply, Math.Rounding.Ceil);
+        }
+    }
+
+    /// @notice Shares `deposit(maxAmounts, ...)` would mint right now: the scarcest asset sets the count.
+    function previewShares(uint256[] calldata maxAmounts) external view returns (uint256 shares) {
+        uint256 n = assets.length;
+        if (maxAmounts.length != n) revert LengthMismatch();
+        uint256 supply = totalSupply();
+        if (supply == 0) {
+            for (uint256 i; i < n; ++i) {
+                shares += assets[i].valuer.valueOf(maxAmounts[i]);
+            }
+            return shares;
+        }
+        shares = type(uint256).max;
+        for (uint256 i; i < n; ++i) {
+            shares = Math.min(shares, Math.mulDiv(maxAmounts[i], supply, _balance(assets[i])));
+        }
+    }
+
+    /// @notice What `redeem(shares)` pays out of every asset right now, after the configured redeem fee.
+    function previewRedeem(uint256 shares) external view returns (uint256[] memory amounts) {
+        uint256 net = shares - shares * config.redeemFeeBps() / BPS;
+        uint256 n = assets.length;
+        uint256 supply = totalSupply();
+        amounts = new uint256[](n);
+        if (supply == 0) return amounts;
+        for (uint256 i; i < n; ++i) {
+            amounts[i] = Math.mulDiv(net, _balance(assets[i]), supply);
+        }
+    }
+
     // ──────────────────────────────────────────── internals ────────────────────────────────────────────
 
     /// @dev Requires the configured block interval since the last rebalance and the drift threshold to be met.

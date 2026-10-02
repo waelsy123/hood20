@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { parseUnits } from "viem";
-import { MOCK } from "../config";
+import { MOCK, USDG, ZERO } from "../config";
 import { useApp } from "../lib/context";
 import { amount, usd } from "../lib/format";
 import { seedAmountsFor } from "../lib/math";
 import { navigate } from "../lib/router";
-import type { CuratedAsset } from "../lib/types";
+import type { BuyQuote, CuratedAsset, VaultInfo } from "../lib/types";
 
 export function Create() {
   const { source, wallet, config, setError } = useApp();
@@ -17,6 +17,7 @@ export function Create() {
   const [seedUsd, setSeedUsd] = useState("10000");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [bq, setBq] = useState<{ key: string; quote: BuyQuote | null; error: string | null } | null>(null);
 
   useEffect(() => {
     source.listAssets().then(setCatalog).catch((e) => setError((e as Error).message));
@@ -40,7 +41,42 @@ export function Create() {
     const idx = catalog.indexOf(p.asset);
     return balances.length ? seedAmounts[i] > (balances[idx] ?? 0n) : false;
   });
-  const ready = name.trim().length > 1 && symbol.trim().length > 1 && picks.length >= 2 && total === 10_000 && seed > 0n && !shortfall.some(Boolean) && !busy;
+  const formOk = name.trim().length > 1 && symbol.trim().length > 1 && picks.length >= 2 && total === 10_000 && seed > 0n && !busy;
+  const ready = formOk && !shortfall.some(Boolean);
+
+  // Seed constituents the wallet is short of are bought with USDG through Uniswap first, like a deposit.
+  const legs = useMemo(() => picks.map((p, i) => {
+    const idx = catalog.indexOf(p.asset);
+    const have = balances[idx] ?? 0n;
+    return seedAmounts[i] > have ? seedAmounts[i] - have : 0n;
+  }), [picks, seedAmounts, balances, catalog]);
+  const pseudoVault: VaultInfo | null = useMemo(() => (picks.length ? {
+    address: ZERO, creator: ZERO, name: name || "new index", symbol: symbol || "INDEX", totalSupply: 0n, nav: 0n, deviationBps: 0, lastRebalanceBlock: 0n,
+    assets: picks.map((p) => ({ token: p.asset.token, valuer: p.asset.valuer, weightBps: p.weightBps, symbol: p.asset.symbol, name: p.asset.name, decimals: p.asset.decimals, balance: 0n, value: 0n, unitValue: p.asset.unitValue })),
+  } : null), [picks, name, symbol]);
+  const legsKey = legs.join(",");
+  const needsBuy = legs.some((l) => l > 0n);
+  useEffect(() => {
+    if (!needsBuy || !pseudoVault || !wallet.address || !formOk) {
+      setBq(null);
+      return;
+    }
+    let cancelled = false;
+    const user = wallet.address;
+    const t = setTimeout(() => {
+      source
+        .quoteBuy(pseudoVault, legs, user)
+        .then((quote) => !cancelled && setBq({ key: legsKey, quote, error: null }))
+        .catch((e) => !cancelled && setBq({ key: legsKey, quote: null, error: (e as Error).message }));
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legsKey, needsBuy, wallet.address, source, formOk]);
+  const quote = bq && bq.key === legsKey ? bq.quote : null;
+  const quoting = needsBuy && formOk && !!wallet.address && (!bq || bq.key !== legsKey);
 
   const toggle = (a: CuratedAsset) => {
     setWeights((w) => {
@@ -59,9 +95,15 @@ export function Create() {
 
   const launch = async () => {
     if (!wallet.address) return wallet.connect().catch((e) => setError((e as Error).message));
-    setBusy("Launching…");
+    const user = wallet.address;
+    setBusy(needsBuy ? "Quoting on Uniswap" : "Launching…");
     try {
-      const r = await source.createVault({ name: name.trim(), symbol: symbol.trim().toUpperCase(), picks, seedAmounts }, wallet.address);
+      if (needsBuy && pseudoVault) {
+        await source.buy(pseudoVault, legs, user, setBusy);
+        setBalances(await source.walletBalances(catalog, user));
+      }
+      setBusy("Launching…");
+      const r = await source.createVault({ name: name.trim(), symbol: symbol.trim().toUpperCase(), picks, seedAmounts }, user);
       navigate(`/app/vault/${r.vault}`);
     } catch (e) {
       setError((e as Error).message);
@@ -122,10 +164,21 @@ export function Create() {
                   </div>
                 ))}
                 <div className="line muted"><span>You receive</span><span>{amount(seed, 18, 0)} {symbol.trim().toUpperCase() || "shares"}</span></div>
+                {needsBuy && wallet.address && (
+                  <div className="line">
+                    <span>Buy the shortfall</span>
+                    <span>{quote ? <>{amount(quote.usdgIn, USDG.decimals, 2)} USDG <span className="muted">(max {amount(quote.usdgMax, USDG.decimals, 2)})</span></> : bq?.error ? <span style={{ color: "var(--bad)" }}>{bq.error}</span> : "quoting…"}</span>
+                  </div>
+                )}
               </div>
             )}
-            <p className="muted small">The factory deploys the vault and makes this first deposit in the same transaction. One INDEX per dollar seeded.</p>
-            <button className="btn primary" disabled={!ready && !!wallet.address} onClick={launch}>{busy ?? (wallet.address ? "Approve & launch" : MOCK ? "Connect demo wallet" : "Connect wallet")}</button>
+            <p className="muted small">
+              The factory deploys the vault and makes this first deposit in the same transaction. One INDEX per dollar seeded.
+              {needsBuy ? " Constituents you do not hold are bought with USDG through Uniswap first (one router transaction, two one-time approvals)." : ""}
+            </p>
+            <button className="btn primary" disabled={!!wallet.address && (needsBuy ? !(formOk && quote) : !ready)} onClick={launch}>
+              {busy ?? (wallet.address ? (needsBuy ? (quoting ? "Quoting…" : "Buy, approve & launch") : "Approve & launch") : MOCK ? "Connect demo wallet" : "Connect wallet")}
+            </button>
           </div>
         </div>
       </div>

@@ -497,4 +497,61 @@ contract IndexVaultTest is Test {
         uint256 pps = nav * 1e18 / vault.totalSupply();
         assertApproxEqAbs(pps, (1_015_000e18 - 37.5e18) * 1e18 / 1_000_000e18, 1e9);
     }
+
+    // ───────────────────────────── previews ─────────────────────────────
+
+    function test_PreviewDepositMatchesDeposit() public {
+        uint256 shares = 100_000e18; // 10% of the $1M seed
+        uint256[] memory preview = vault.previewDeposit(shares);
+        assertEq(preview[0], 20e18);
+        assertEq(preview[1], 1_000e6);
+        assertEq(vault.previewShares(preview), shares);
+
+        vm.prank(bob);
+        (uint256 minted, uint256[] memory amounts) = vault.deposit(preview, shares, bob);
+        assertEq(minted, shares, "the preview buys exactly the shares asked for");
+        assertEq(amounts[0], preview[0]);
+        assertEq(amounts[1], preview[1]);
+
+        // odd amounts: the preview rounds up like the contract, and never under-states what is pulled
+        uint256 odd = 123_456_789_012_345_678_901;
+        uint256[] memory p2 = vault.previewDeposit(odd);
+        vm.prank(bob);
+        (uint256 m2, uint256[] memory a2) = vault.deposit(p2, odd, bob);
+        assertGe(m2, odd);
+        assertEq(a2[0], p2[0]);
+        assertEq(a2[1], p2[1]);
+    }
+
+    function test_PreviewSharesMinOverAssets() public view {
+        // offering twice the WETH changes nothing: the stock is the scarce leg
+        assertEq(vault.previewShares(_arr(40e18, 1_000e6)), 100_000e18);
+        assertEq(vault.previewShares(_arr(20e18, 2_000e6)), 100_000e18);
+        assertEq(vault.previewShares(_arr(0, 2_000e6)), 0);
+    }
+
+    function test_PreviewRedeemMatchesRedeem() public {
+        config.set(50, 50, 1_000, 18_000, 25, address(0xFEE)); // 0.25% redeem fee kept as INDEX
+        uint256 shares = 100_000e18;
+        uint256[] memory preview = vault.previewRedeem(shares);
+        uint256 wethBefore = weth.balanceOf(alice);
+        uint256 stockBefore = stock.balanceOf(alice);
+        vm.prank(alice);
+        uint256[] memory out = vault.redeem(shares, alice);
+        assertEq(out[0], preview[0]);
+        assertEq(out[1], preview[1]);
+        assertEq(weth.balanceOf(alice) - wethBefore, preview[0]);
+        assertEq(stock.balanceOf(alice) - stockBefore, preview[1]);
+        assertLt(preview[0], 20e18); // the fee slice stayed in the vault
+    }
+
+    function test_PreviewsOnEmptyVault() public {
+        IndexVault fresh = _new("Fresh", "FRESH", _twoAssets(5000, 5000));
+        assertEq(fresh.previewDeposit(1e18)[0], 0);
+        assertEq(fresh.previewRedeem(1e18)[1], 0);
+        // first deposit is priced by the valuers: 1 WETH + 50 STOCK = $2,500 + $2,500 -> 5,000 INDEX
+        assertEq(fresh.previewShares(_arr(1e18, 50e6)), 5_000e18);
+        vm.expectRevert(IndexVault.LengthMismatch.selector);
+        fresh.previewShares(new uint256[](1));
+    }
 }

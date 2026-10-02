@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits, parseUnits, type Address } from "viem";
-import { CHAIN, MOCK } from "../config";
+import { CHAIN, MOCK, USDG } from "../config";
 import { useApp } from "../lib/context";
 import { amount, blocksToTime, pct, short, usd } from "../lib/format";
 import { depositAmounts, gaps, incentiveSplit, navPerShare, redeemAmounts, sharesForUsd, WAD } from "../lib/math";
 import { Link } from "../lib/router";
 import { rebalanceState } from "../lib/status";
-import type { Position, VaultInfo } from "../lib/types";
+import type { BuyQuote, Position, VaultInfo } from "../lib/types";
 import { StatePill } from "./Vaults";
 
 function parseDecimal(s: string, decimals: number): bigint | null {
@@ -28,7 +28,10 @@ export function Vault({ address }: { address: Address }) {
   const [v, setV] = useState<VaultInfo | null>(null);
   const [pos, setPos] = useState<Position | null>(null);
   const [tab, setTab] = useState<"deposit" | "redeem">("deposit");
+  const [pay, setPay] = useState<"usdg" | "assets">("usdg");
   const [usdIn, setUsdIn] = useState("");
+  const [usdgBal, setUsdgBal] = useState<bigint | null>(null);
+  const [bq, setBq] = useState<{ key: string; quote: BuyQuote | null; error: string | null } | null>(null);
   const [sharesIn, setSharesIn] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<{ text: string; hash: string } | null>(null);
@@ -37,8 +40,13 @@ export function Vault({ address }: { address: Address }) {
     try {
       const vault = await source.getVault(address);
       setV(vault);
-      if (wallet.address) setPos(await source.getPosition(vault, wallet.address));
-      else setPos(null);
+      if (wallet.address) {
+        setPos(await source.getPosition(vault, wallet.address));
+        setUsdgBal(await source.usdgBalance(wallet.address));
+      } else {
+        setPos(null);
+        setUsdgBal(null);
+      }
     } catch (e) {
       setError((e as Error).message);
     }
@@ -59,6 +67,37 @@ export function Vault({ address }: { address: Address }) {
   const depositNeeds = v && sharesWanted > 0n ? depositAmounts(v, sharesWanted) : null;
   const shortAssets = v && depositNeeds && pos ? depositNeeds.map((n, i) => n > pos.balances[i]) : [];
   const canDeposit = !!(v && depositNeeds && pos && sharesWanted > 0n && !shortAssets.some(Boolean) && !busy);
+
+  // paying with USDG: buy only what the wallet is short of, through Uniswap, then deposit
+  const legs = useMemo(() => (depositNeeds && pos ? depositNeeds.map((n, i) => (n > pos.balances[i] ? n - pos.balances[i] : 0n)) : null), [depositNeeds, pos]);
+  const legsKey = legs ? `${address}:${legs.join(",")}` : "";
+  useEffect(() => {
+    if (pay !== "usdg" || !v || !legs || !wallet.address || sharesWanted === 0n) {
+      setBq(null);
+      return;
+    }
+    if (legs.every((l) => l === 0n)) {
+      setBq({ key: legsKey, quote: { legs: [], usdgIn: 0n, usdgMax: 0n, raw: [] }, error: null });
+      return;
+    }
+    let cancelled = false;
+    const user = wallet.address;
+    const t = setTimeout(() => {
+      source
+        .quoteBuy(v, legs, user)
+        .then((quote) => !cancelled && setBq({ key: legsKey, quote, error: null }))
+        .catch((e) => !cancelled && setBq({ key: legsKey, quote: null, error: (e as Error).message }));
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pay, legsKey, wallet.address, source]);
+  const quoting = pay === "usdg" && !!legs && sharesWanted > 0n && (!bq || bq.key !== legsKey);
+  const quote = bq && bq.key === legsKey ? bq.quote : null;
+  const usdgShort = !!(quote && usdgBal !== null && quote.usdgMax > usdgBal);
+  const canBuy = !!(v && legs && pos && sharesWanted > 0n && quote && !usdgShort && !busy);
 
   // redeem preview
   const sharesOut = parseDecimal(sharesIn, 18);
@@ -95,6 +134,33 @@ export function Vault({ address }: { address: Address }) {
       const minShares = (sharesWanted * 995n) / 1000n; // 0.5% slack for rounding and mix changes in flight
       const r = await source.deposit(v, depositNeeds, minShares, user);
       setDone({ text: "Deposit confirmed", hash: r.hash });
+      setUsdIn("");
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doBuyAndDeposit = async () => {
+    if (!v || !depositNeeds || !legs || !pos || !wallet.address) return;
+    const user = wallet.address;
+    setDone(null);
+    setBusy("Quoting on Uniswap");
+    try {
+      const bought = await source.buy(v, legs, user, setBusy);
+      const fresh = await source.getPosition(v, user);
+      for (let i = 0; i < v.assets.length; i++) {
+        if (fresh.allowances[i] < depositNeeds[i]) {
+          setBusy(`Approving ${v.assets[i].symbol}`);
+          await source.approve(v, i, depositNeeds[i], user);
+        }
+      }
+      setBusy("Depositing");
+      const minShares = (sharesWanted * 995n) / 1000n; // 0.5% slack for rounding and mix changes in flight
+      const r = await source.deposit(v, depositNeeds, minShares, user);
+      setDone({ text: bought.hash ? "Bought on Uniswap and deposited" : "Deposit confirmed", hash: r.hash });
       setUsdIn("");
       await refresh();
     } catch (e) {
@@ -209,20 +275,51 @@ export function Vault({ address }: { address: Address }) {
                   <label>Amount to deposit</label>
                   <div className="input"><input inputMode="decimal" placeholder="1000" value={usdIn} onChange={(e) => setUsdIn(e.target.value)} /><span className="suffix">USD</span></div>
                 </div>
+                <div className="row small" style={{ gap: 14, marginBottom: 10 }}>
+                  <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "usdg"} onChange={() => setPay("usdg")} /> Pay with USDG</label>
+                  <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "assets"} onChange={() => setPay("assets")} /> Deposit the assets I hold</label>
+                </div>
                 {depositNeeds && pos && (
                   <div className="preview">
                     <div className="line"><span>You receive</span><span>{amount(sharesWanted, 18, 4)} {v.symbol}</span></div>
-                    {v.assets.map((a, i) => (
-                      <div className="line" key={a.token} style={{ color: shortAssets[i] ? "var(--bad)" : "inherit" }}>
-                        <span>{a.symbol}</span>
-                        <span>{amount(depositNeeds[i], a.decimals, 6)} <span className="muted">/ {amount(pos.balances[i], a.decimals, 4)} held</span></span>
+                    {v.assets.map((a, i) => {
+                      const leg = quote?.legs.find((l) => l.index === i);
+                      return (
+                        <div className="line" key={a.token} style={{ color: pay === "assets" && shortAssets[i] ? "var(--bad)" : "inherit" }}>
+                          <span>{a.symbol}</span>
+                          <span>
+                            {amount(depositNeeds[i], a.decimals, 6)}
+                            {pay === "usdg" && legs && legs[i] > 0n ? (
+                              <span className="muted"> · buy {amount(legs[i], a.decimals, 6)}{leg ? ` for ${amount(leg.usdgIn, USDG.decimals, 2)} USDG` : quoting ? " …" : ""}</span>
+                            ) : (
+                              <span className="muted"> / {amount(pos.balances[i], a.decimals, 4)} held</span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {pay === "usdg" && quote && quote.legs.length > 0 && (
+                      <div className="line" style={{ color: usdgShort ? "var(--bad)" : "inherit" }}>
+                        <span>Pay</span>
+                        <span>{amount(quote.usdgIn, USDG.decimals, 2)} USDG <span className="muted">(max {amount(quote.usdgMax, USDG.decimals, 2)} · you hold {usdgBal === null ? "—" : amount(usdgBal, USDG.decimals, 2)})</span></span>
                       </div>
-                    ))}
+                    )}
+                    {pay === "usdg" && bq?.error && bq.key === legsKey && <div className="line" style={{ color: "var(--bad)" }}><span>Uniswap</span><span>{bq.error}</span></div>}
                   </div>
                 )}
-                <p className="muted small">Deposits pull every asset in the vault's current ratio. Approvals are requested per asset, then one deposit call.</p>
+                {pay === "usdg" ? (
+                  <p className="muted small">
+                    Uniswap routes each constituent and your wallet sends one router transaction that buys exactly what the vault pulls, then one
+                    deposit. Two one-time approvals (USDG to Permit2, Permit2 to the router) and a per-asset approval to the vault are requested
+                    when missing.{MOCK ? " Demo mode fills at the Chainlink price plus 0.3%." : ""}
+                  </p>
+                ) : (
+                  <p className="muted small">Deposits pull every asset in the vault's current ratio. Approvals are requested per asset, then one deposit call.</p>
+                )}
                 {!wallet.address ? (
                   <button className="btn primary" onClick={() => wallet.connect().catch((e) => setError((e as Error).message))}>Connect wallet</button>
+                ) : pay === "usdg" ? (
+                  <button className="btn primary" disabled={!canBuy} onClick={doBuyAndDeposit}>{busy ?? (quoting ? "Quoting…" : "Buy & deposit")}</button>
                 ) : (
                   <button className="btn primary" disabled={!canDeposit} onClick={doDeposit}>{busy ?? "Approve & deposit"}</button>
                 )}

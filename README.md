@@ -163,18 +163,36 @@ Chainlink risk tier, market hours) merged with Robinhood's stock-token registry 
 multiplier, trading status), each checked live on-chain (price, last update, aggregator match, token symbol).
 Regenerate with `cd web && node scripts/feeds.mjs`; the dapp's curated catalog reads token and feed addresses from it.
 
-## Zap: one call from USDG into an index, and back
+## Buying an index with USDG: Uniswap routes, two wallet transactions
 
-[`src/Zap.sol`](src/Zap.sol) is a stateless periphery contract with no owner. `zapIn(vault, tokenIn, amountIn, permit,
-swaps, minShares, deadline)` pulls the input token (Permit2 signature transfer, or a plain allowance when the
-signature is empty), runs each swap as caller-supplied calldata against a router the config owner has allowlisted
-(`IndexConfig.setRouter`), approving the router for exactly the stated input and revoking afterwards, then deposits
-every vault asset it now holds, sends the shares to the caller and refunds all leftovers in the same transaction.
-`zapOut` mirrors it: pull shares, redeem, sell each asset along the given swaps, pay at least `minOut` of the output
-token, refund dust. The caller only ever moves their own funds: the zap never delegatecalls, holds nothing between
-transactions, and routers are paid from its transient balance, so nobody can reach another user's allowance through
-it. Swap calldata comes from an aggregator quote (0x, 1inch) or a Uniswap router call; Permit2 is live at its
-canonical address on Robinhood Chain.
+Vaults only take pro-rata deposits of every constituent, and there is deliberately no zap or router contract in front
+of them: a periphery that holds user funds mid-transaction needs an owner-curated router allowlist and its own audit
+surface, and routing is a problem Uniswap already solves. The dapp's **Pay with USDG** flow therefore outsources the
+swaps entirely:
+
+1. For the shares you want, the dapp computes the exact amount of every constituent the vault will pull
+   (`depositAmounts`, the same ceil rounding as the contract) and asks Uniswap's hosted Trading API for an
+   **exact-output** quote per asset you are short of (`type: EXACT_OUTPUT`, `protocols: [V2, V3, V4]` so the answer
+   is an on-chain swap, never a UniswapX order). Uniswap picks the pools and returns Universal Router calldata per leg.
+2. Your wallet sends **one** Universal Router `execute` with all legs appended (the dapp only concatenates the
+   commands Uniswap returned and refuses to send them anywhere but the router), paid through Permit2. Two one-time
+   approvals are requested when missing: USDG → Permit2 and Permit2 → Universal Router.
+3. Your wallet sends `deposit(amounts, minShares, you)` with exactly what was bought; `minShares` guards the quote.
+   The vault exposes the same math on-chain: `previewDeposit(shares)` is what a depositor must hold and approve
+   for exactly `shares`, `previewShares(maxAmounts)` what a deposit would mint, `previewRedeem(shares)` what a
+   redemption pays.
+   Per-asset approvals to the vault are requested once per vault. Buying exact outputs means no dust: the vault pulls
+   precisely what arrived.
+
+Routing never touches the contracts, so nothing on-chain has to be trusted with it, and the dapp carries no pool
+knowledge. The API key stays server-side: [`web/functions/api/uniswap/[[path]].ts`](web/functions/api/uniswap/%5B%5Bpath%5D%5D.ts)
+is a Cloudflare Pages Function proxying `/quote`, `/swap` and `/check_approval` with the `UNISWAP_API_KEY` secret
+(set on the hood20 project; locally `web/.dev.vars` and `npm run preview:pages`). Requests carry
+`x-universal-router-version: 2.1.2`, the router build deployed on this chain, and are spaced to stay under the key's
+6 requests per second. Verified against the live API on 2026-10-02: exact-output quotes for Robinhood stock tokens
+come back `CLASSIC` through v4 pools, `/swap` returns `execute` calldata for the Universal Router, and two legs merge
+into one call with their inputs intact. Without the key the purchase tab reports that quotes are unavailable;
+depositing assets you already hold always works.
 
 ## Gas (10-asset vault)
 
@@ -184,7 +202,7 @@ canonical address on Robinhood Chain.
 | `deposit` | ~289k | $0.032 |
 | `redeem` | ~247k | $0.028 |
 | `rebalance` (10 assets listed, callback moves all 10, creator paid) | ~671k | $0.075 |
-| `snapshot`, `deviationBps`, `assets` | views | free |
+| `snapshot`, `deviationBps`, `assets`, `previewDeposit`, `previewShares`, `previewRedeem` | views | free |
 
 Measured by [`test/Gas.t.sol`](test/Gas.t.sol) with `forge test --match-contract GasTest --isolate --gas-report`
 (each call its own transaction, cold storage, mock ERC-20s; Robinhood Stock Tokens run blocklist checks, so expect
@@ -202,7 +220,7 @@ the ABIs from the Forge artifacts so the dapp can never drift from the contracts
 
 ```sh
 forge build
-forge test -vv          # 31 tests incl. two fuzz properties (1,000 runs each)
+forge test -vv          # 29 tests incl. four fuzz properties (two at 1,000 runs, two 10-asset deposit fuzzes at 400)
 forge fmt --check
 slither .               # optional static analysis
 ```
@@ -214,7 +232,6 @@ cp .env.example .env    # OWNER for the config; CONFIG to register assets; FACTO
 source .env
 forge script script/DeployFactory.s.sol --rpc-url robinhood --account <keystore-name> --broadcast   # config + factory, once
 forge script script/RegisterAssets.s.sol --rpc-url robinhood --account <keystore-name> --broadcast  # adapters for every verified feed, once
-forge script script/DeployZap.s.sol --rpc-url robinhood --account <keystore-name> --broadcast       # zap + router allowlist, once
 forge script script/CreateVault.s.sol --rpc-url robinhood --account <keystore-name> --broadcast     # one seeded vault
 ```
 

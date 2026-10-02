@@ -57,6 +57,23 @@ export const CURATED_ASSETS: CatalogEntry[] = FEEDS.filter((f) => f.kind !== "ex
   })
   .sort((a, b) => (a.kind === b.kind ? a.symbol.localeCompare(b.symbol) : a.kind === "equity" ? -1 : 1));
 
+/** Global Dollar, the quote currency of the purchase flow (6 decimals; verified on-chain in the feed directory). */
+const usdgFeed = FEEDS.find((f) => f.symbol === "USDG" && f.token?.address)!;
+export const USDG = { symbol: "USDG", address: usdgFeed.token!.address as Address, decimals: usdgFeed.token!.onchain?.decimals ?? usdgFeed.token!.decimals ?? 6 };
+
+/**
+ * Uniswap on Robinhood Chain (Uniswap Labs deployments, github.com/Uniswap/contracts deployments/4663.md). The dapp
+ * never routes: Uniswap's Trading API picks the pools and returns Universal Router calldata, which the dapp only
+ * sends to this router address. The API key stays server-side in web/functions/api/uniswap (secret UNISWAP_API_KEY).
+ */
+export const UNISWAP = {
+  universalRouter: "0x204FAca1764B154221e35c0d20aBb3c525710498" as Address,
+  universalRouterVersion: "2.1.2", // the Trading API encodes for this build when asked (x-universal-router-version)
+  permit2: "0x000000000022D473030F116dDEE9F6B43aC78BA3" as Address,
+  tradingApi: "https://trade-api.gateway.uniswap.org/v1",
+  slippagePct: 0.5,
+};
+
 export const LINKS = {
   repo: "https://github.com/waelsy123/hood20",
   chainDocs: "https://docs.robinhood.com/chain/",

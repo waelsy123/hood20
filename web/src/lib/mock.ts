@@ -1,7 +1,7 @@
 import { parseUnits, type Address } from "viem";
-import type { AssetInfo, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
-import { depositAmounts, redeemAmounts, gaps } from "./math";
-import { CHAIN, CURATED_ASSETS } from "../config";
+import type { AssetInfo, BuyQuote, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
+import { depositAmounts, redeemAmounts, gaps, mulDivCeil } from "./math";
+import { CHAIN, CURATED_ASSETS, USDG } from "../config";
 
 export const DEMO_USER: Address = "0xD3110000000000000000000000000000000000d0";
 const CONFIG_ADDR: Address = "0xC0DF000000000000000000000000000000000001";
@@ -82,6 +82,7 @@ class World {
   // the demo wallet holds about $25,000 of every asset
   wallet = new Map<string, bigint>(CATALOG.map((a) => [a.token, parseUnits((25_000 / a.price).toFixed(6), a.decimals)]));
   allowances = new Map<string, bigint>();
+  usdg = parseUnits("50000", USDG.decimals); // and $50,000 of USDG to buy with
   nextVault = 2;
 }
 
@@ -166,6 +167,38 @@ export class MockSource implements Source {
   }
   async walletBalances(assets: CuratedAsset[], _user: Address): Promise<bigint[]> {
     return assets.map((a) => this.w.wallet.get(a.token) ?? 0n);
+  }
+  async usdgBalance(_user: Address) {
+    return this.w.usdg;
+  }
+  /** Demo "Uniswap": fills at the Chainlink price plus 30 bps, with the same 0.5% maximum as the real quotes. */
+  async quoteBuy(vault: VaultInfo, legs: bigint[], _user: Address): Promise<BuyQuote> {
+    await sleep(400);
+    const out: BuyQuote = { legs: [], usdgIn: 0n, usdgMax: 0n, raw: [] };
+    legs.forEach((amt, i) => {
+      if (amt === 0n) return;
+      const a = vault.assets[i];
+      const usdValue = (amt * a.unitValue) / 10n ** BigInt(a.decimals); // 18 decimals
+      const usdgIn = mulDivCeil(usdValue * 10_030n, 1n, 10_000n * 10n ** BigInt(18 - USDG.decimals));
+      const usdgMax = mulDivCeil(usdgIn * 10_050n, 1n, 10_000n);
+      out.legs.push({ index: i, amountOut: amt, usdgIn, usdgMax, routing: "CLASSIC" });
+      out.usdgIn += usdgIn;
+      out.usdgMax += usdgMax;
+    });
+    return out;
+  }
+  async buy(vault: VaultInfo, legs: bigint[], user: Address, onStep: (label: string) => void): Promise<TxResult & { quote: BuyQuote }> {
+    const quote = await this.quoteBuy(vault, legs, user);
+    if (quote.legs.length === 0) return { hash: "", quote };
+    if (this.w.usdg < quote.usdgIn) throw new Error("Insufficient USDG balance");
+    onStep("Swapping on Uniswap");
+    await sleep(900);
+    this.w.usdg -= quote.usdgIn;
+    quote.legs.forEach((l) => {
+      const t = vault.assets[l.index].token;
+      this.w.wallet.set(t, (this.w.wallet.get(t) ?? 0n) + l.amountOut);
+    });
+    return { hash: hash(), quote };
   }
   async createVault(input: CreateInput, user: Address): Promise<TxResult & { vault: Address }> {
     await sleep(1200);

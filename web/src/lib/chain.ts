@@ -1,7 +1,8 @@
 import { createPublicClient, createWalletClient, custom, defineChain, http, type Address, type WalletClient } from "viem";
-import { ADDRESSES, CHAIN } from "../config";
+import { ADDRESSES, CHAIN, UNISWAP, USDG } from "../config";
 import { ChainlinkAdapterAbi, IndexConfigAbi, IndexVaultAbi, IndexVaultFactoryAbi, erc20Abi } from "../abi";
-import type { ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
+import type { BuyQuote, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
+import { MAX_UINT160, maxInput, mergeSwaps, permit2Abi, quoteExactOutput, swapTransaction, type ApiQuote } from "./uniswap";
 
 export const robinhoodChain = defineChain({
   id: CHAIN.id,
@@ -153,5 +154,59 @@ export class ChainSource implements Source {
   }
   redeem(vault: VaultInfo, shares: bigint, user: Address) {
     return send(user, () => wallet().writeContract({ account: user, chain: robinhoodChain, address: vault.address, abi: IndexVaultAbi, functionName: "redeem", args: [shares, user] }));
+  }
+
+  // ───────────── buying constituents with USDG: Uniswap routes, the wallet sends one router call ─────────────
+
+  usdgBalance(user: Address) {
+    return publicClient.readContract({ address: USDG.address, abi: erc20Abi, functionName: "balanceOf", args: [user] });
+  }
+
+  async quoteBuy(vault: VaultInfo, legs: bigint[], user: Address): Promise<BuyQuote> {
+    const raw = await Promise.all(legs.map((amt, i) => (amt > 0n ? quoteExactOutput(user, vault.assets[i].token, amt) : Promise.resolve(null))));
+    const out: BuyQuote = { legs: [], usdgIn: 0n, usdgMax: 0n, raw };
+    raw.forEach((q, i) => {
+      if (!q) return;
+      const usdgIn = BigInt(q.quote.input.amount);
+      const usdgMax = maxInput(q);
+      out.legs.push({ index: i, amountOut: legs[i], usdgIn, usdgMax, routing: q.routing });
+      out.usdgIn += usdgIn;
+      out.usdgMax += usdgMax;
+    });
+    return out;
+  }
+
+  async buy(vault: VaultInfo, legs: bigint[], user: Address, onStep: (label: string) => void): Promise<TxResult & { quote: BuyQuote }> {
+    const wc = wallet();
+    const tx = async (label: string, fn: () => Promise<`0x${string}`>) => {
+      onStep(label);
+      const h = await fn();
+      await publicClient.waitForTransactionReceipt({ hash: h });
+      return h;
+    };
+    onStep("Quoting on Uniswap");
+    let quote = await this.quoteBuy(vault, legs, user);
+    if (quote.legs.length === 0) return { hash: "", quote };
+
+    // One-time approvals a wallet sets once: USDG -> Permit2, then Permit2 -> Universal Router.
+    const erc20Allowance = await publicClient.readContract({ address: USDG.address, abi: erc20Abi, functionName: "allowance", args: [user, UNISWAP.permit2] });
+    if (erc20Allowance < quote.usdgMax) {
+      await tx("Approving USDG for Permit2", () => wc.writeContract({ account: user, chain: robinhoodChain, address: USDG.address, abi: erc20Abi, functionName: "approve", args: [UNISWAP.permit2, 2n ** 256n - 1n] }));
+    }
+    const [p2Amount, p2Expiration] = await publicClient.readContract({ address: UNISWAP.permit2, abi: permit2Abi, functionName: "allowance", args: [user, USDG.address, UNISWAP.universalRouter] });
+    const now = Math.floor(Date.now() / 1000);
+    if (p2Amount < quote.usdgMax || p2Expiration <= now + 600) {
+      await tx("Allowing Uniswap's router to spend USDG", () =>
+        wc.writeContract({ account: user, chain: robinhoodChain, address: UNISWAP.permit2, abi: permit2Abi, functionName: "approve", args: [USDG.address, UNISWAP.universalRouter, MAX_UINT160, now + 30 * 24 * 3600] }),
+      );
+      onStep("Quoting on Uniswap");
+      quote = await this.quoteBuy(vault, legs, user); // the API now sees the allowance and drops the permit signature
+    }
+
+    onStep("Building the swap");
+    const swaps = await Promise.all((quote.raw as (ApiQuote | null)[]).filter((q): q is ApiQuote => q !== null).map(swapTransaction));
+    const merged = mergeSwaps(swaps);
+    const hash = await tx("Swapping on Uniswap", () => wc.sendTransaction({ account: user, chain: robinhoodChain, to: merged.to, data: merged.data, value: merged.value }));
+    return { hash, quote };
   }
 }

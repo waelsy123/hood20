@@ -60,12 +60,15 @@ push_i   = ceil((target_i - value_i) / price_i)    // underweight assets`}</pre>
         <li>Deposits and redemptions never touch an oracle, so nobody can mint against a stale price.</li>
       </ul>
 
-      <h2 id="zap">Buying with USDG</h2>
+      <h2 id="buying">Buying with USDG</h2>
       <p>
-        Vaults only take pro-rata deposits of every constituent, so a stateless <code>Zap</code> contract does the conversion in one call: it pulls
-        USDG (Permit2 signature or allowance), swaps into each asset through routers the config owner allowlists, deposits what it received,
-        sends you the shares and refunds any dust. <code>zapOut</code> does the reverse. It never holds funds between transactions and can only ever
-        move the caller's own.
+        Vaults only take pro-rata deposits of every constituent, and there is no zap or router contract in front of them on purpose: routing
+        is a problem Uniswap already solves, and a periphery holding your funds mid-transaction would need its own allowlist and audit. When
+        you pay with USDG, the dapp asks Uniswap&apos;s Trading API for an exact-output quote per constituent you are short of, your wallet
+        sends one Universal Router transaction with all those legs (paid through Permit2, two one-time approvals), then one
+        <code>deposit</code> with exactly what arrived and <code>minShares</code> at the quote. No dust, nothing on-chain decides where the
+        swaps go, and depositing assets you already hold needs no swap at all. Selling is the mirror image: <code>redeem</code>, then sell
+        the constituents on Uniswap.
       </p>
 
       <h2 id="config">Shared config</h2>
