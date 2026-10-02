@@ -25,38 +25,37 @@ export const ADDRESSES: { factory: Address; config: Address } = {
 export const MOCK = ADDRESSES.factory === ZERO;
 
 /** Verified Chainlink feed and token addresses on Robinhood Chain (data/robinhood-chain-feeds.json, `node scripts/feeds.mjs`). */
-type FeedEntry = { symbol: string; kind: string; proxy: string; token: { symbol?: string; address?: string | null; decimals?: number } | null };
+type FeedEntry = {
+  symbol: string;
+  kind: string;
+  proxy: string;
+  onchain: { price?: number };
+  token: { symbol?: string; name?: string; address?: string | null; decimals?: number; onchain?: { symbolMatches?: boolean; decimals?: number } } | null;
+};
 const FEEDS = (feedsFile as { feeds: FeedEntry[] }).feeds;
-const feedFor = (symbol: string) => FEEDS.find((f) => f.symbol === symbol && f.kind !== "exchange-rate");
+
+export type CatalogEntry = { key: string; symbol: string; name: string; token: Address; feed: Address; valuer: Address; decimals: number; price: number; kind: string };
 
 /**
- * Assets creators may pick from. Token and feed addresses come from the verified feed directory; `valuer` is the
- * ChainlinkAdapter deployed for that pair and stays ZERO until adapters are live (the app then still runs in
- * demo mode because the factory address is ZERO).
+ * Assets creators may pick from: every USD feed on the chain whose token was verified on-chain (35 Robinhood stock
+ * tokens plus WETH and USDG). `valuer` is the ChainlinkAdapter for that pair and stays ZERO until adapters are live.
  */
-export const CURATED_ASSETS: { key: string; symbol: string; name: string; token: Address; feed: Address; valuer: Address; decimals: number }[] = (
-  [
-    ["SPY", "S&P 500 ETF (Robinhood Stock Token)"],
-    ["NVDA", "NVIDIA (Robinhood Stock Token)"],
-    ["AAPL", "Apple (Robinhood Stock Token)"],
-    ["MSFT", "Microsoft (Robinhood Stock Token)"],
-    ["AMZN", "Amazon (Robinhood Stock Token)"],
-    ["GOOGL", "Alphabet (Robinhood Stock Token)"],
-    ["TSLA", "Tesla (Robinhood Stock Token)"],
-    ["ETH", "Wrapped Ether"],
-  ] as const
-).map(([symbol, name]) => {
-  const f = feedFor(symbol);
-  return {
-    key: symbol === "ETH" ? "WETH" : symbol,
-    symbol: symbol === "ETH" ? "WETH" : symbol,
-    name,
-    token: ((f?.token?.address as Address | undefined) ?? ZERO) as Address,
-    feed: ((f?.proxy as Address | undefined) ?? ZERO) as Address,
-    valuer: ZERO,
-    decimals: f?.token?.decimals ?? 18,
-  };
-});
+export const CURATED_ASSETS: CatalogEntry[] = FEEDS.filter((f) => f.kind !== "exchange-rate" && f.token?.address && f.token.onchain?.symbolMatches)
+  .map((f) => {
+    const sym = f.token!.symbol ?? f.symbol;
+    return {
+      key: sym,
+      symbol: sym,
+      name: (f.token!.name ?? f.symbol).replace(" • Robinhood Token", ""),
+      token: f.token!.address as Address,
+      feed: f.proxy as Address,
+      valuer: ZERO,
+      decimals: f.token!.onchain?.decimals ?? f.token!.decimals ?? 18,
+      price: f.onchain.price ?? 0,
+      kind: f.kind,
+    };
+  })
+  .sort((a, b) => (a.kind === b.kind ? a.symbol.localeCompare(b.symbol) : a.kind === "equity" ? -1 : 1));
 
 export const LINKS = {
   repo: "https://github.com/waelsy123/hood20",

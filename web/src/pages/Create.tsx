@@ -15,6 +15,7 @@ export function Create() {
   const [symbol, setSymbol] = useState("");
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [seedUsd, setSeedUsd] = useState("10000");
+  const [search, setSearch] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
@@ -80,9 +81,12 @@ export function Create() {
 
       <div className="grid cols-2" style={{ alignItems: "start" }}>
         <div className="card">
-          <h3>1 · Assets and weights</h3>
+          <div className="row between" style={{ marginBottom: 10 }}>
+            <h3 style={{ margin: 0 }}>1 · Assets and weights</h3>
+            <div className="input" style={{ maxWidth: 220 }}><input placeholder="Search assets…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+          </div>
           <div className="picker">
-            {catalog.map((a) => {
+            {catalog.filter((a) => !search || `${a.symbol} ${a.name}`.toLowerCase().includes(search.toLowerCase()) || weights[a.key] !== undefined).map((a) => {
               const on = weights[a.key] !== undefined;
               return (
                 <label key={a.key} className={`pick ${on ? "on" : ""}`}>
