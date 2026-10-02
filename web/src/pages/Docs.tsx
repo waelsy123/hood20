@@ -77,7 +77,8 @@ push_i   = ceil((target_i - value_i) / price_i)    // underweight assets`}</pre>
 
       <h2 id="oracles">Price sources</h2>
       <p>
-        Each asset carries a <code>ChainlinkAdapter</code> bound to one Chainlink USD feed with a staleness limit of about 25 hours. Robinhood Chain's
+        The config owner registers which assets vaults may hold; each registration deploys an immutable <code>ChainlinkAdapter</code>
+        bound to one Chainlink USD feed with a staleness limit of about 25 hours, and creators pick only from that list. Robinhood Chain's
         equity feeds publish nothing from Friday's last tick until Sunday 8pm ET, so vaults holding stock tokens refuse to rebalance over weekends
         while on-chain pools keep trading. That is deliberate: a stale price is never settled against. Swapping a source means a new adapter and a
         successor vault; no live vault can have its valuer changed.

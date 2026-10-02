@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {Test, stdError} from "forge-std/Test.sol";
-import {ChainlinkAdapter} from "../src/ChainlinkAdapter.sol";
 import {IndexConfig} from "../src/IndexConfig.sol";
 import {IndexVault} from "../src/IndexVault.sol";
 import {IndexVaultFactory} from "../src/IndexVaultFactory.sol";
@@ -33,10 +32,12 @@ contract IndexVaultFactoryTest is Test {
         vm.stopPrank();
     }
 
-    function _config(uint256 w0, uint256 w1) internal returns (IndexVault.Asset[] memory a) {
-        a = new IndexVault.Asset[](2);
-        a[0] = IndexVault.Asset({token: weth, valuer: new ChainlinkAdapter(weth, feedWeth, 90_000), weightBps: w0});
-        a[1] = IndexVault.Asset({token: stock, valuer: new ChainlinkAdapter(stock, feedStock, 90_000), weightBps: w1});
+    function _config(uint256 w0, uint256 w1) internal returns (IndexVault.AssetInput[] memory a) {
+        config.registerAsset(weth, feedWeth, 90_000);
+        config.registerAsset(stock, feedStock, 90_000);
+        a = new IndexVault.AssetInput[](2);
+        a[0] = IndexVault.AssetInput({token: weth, weightBps: w0});
+        a[1] = IndexVault.AssetInput({token: stock, weightBps: w1});
     }
 
     function _seed(uint256 a, uint256 b) internal pure returns (uint256[] memory s) {
@@ -45,7 +46,7 @@ contract IndexVaultFactoryTest is Test {
     }
 
     function test_CreateDeploysSeedsAndRecords() public {
-        IndexVault.Asset[] memory assets = _config(5000, 5000); // deploys adapters: build before arming cheatcodes
+        IndexVault.AssetInput[] memory assets = _config(5000, 5000); // registers assets: build before arming cheatcodes
         IndexVault predicted = IndexVault(vm.computeCreateAddress(address(factory), 1));
         vm.expectEmit();
         emit IndexVaultFactory.VaultCreated(predicted, alice);
@@ -65,8 +66,8 @@ contract IndexVaultFactoryTest is Test {
     }
 
     function test_CreateRevertsOnBadConfigOrSeed() public {
-        IndexVault.Asset[] memory badSum = _config(5000, 4000);
-        IndexVault.Asset[] memory ok = _config(5000, 5000);
+        IndexVault.AssetInput[] memory badSum = _config(5000, 4000);
+        IndexVault.AssetInput[] memory ok = _config(5000, 5000);
 
         vm.prank(alice);
         vm.expectRevert(IndexVault.InvalidWeights.selector);

@@ -27,7 +27,7 @@ contract IndexVaultFactory {
     function create(
         string calldata name,
         string calldata symbol,
-        IndexVault.Asset[] calldata assets_,
+        IndexVault.AssetInput[] calldata assets_,
         uint256[] calldata seed
     ) external returns (IndexVault vault) {
         vault = new IndexVault(name, symbol, assets_, config, msg.sender);

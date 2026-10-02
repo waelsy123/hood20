@@ -3,10 +3,17 @@ pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
+import {ChainlinkAdapter, IAggregatorV3} from "./ChainlinkAdapter.sol";
+import {IValuer} from "./IValuer.sol";
 
-/// @title IndexConfig - owner-managed settings shared by every IndexVault
-/// @notice Deployed once, handed to the factory and from there to every vault, which read it live. Hard caps
-///         bound what the owner can ever set, so vault users know the worst case up front.
+/// @title IndexConfig - owner-managed settings and the curated asset registry shared by every IndexVault
+/// @notice Deployed once, handed to the factory and from there to every vault, which read the settings live. Hard
+///         caps bound what the owner can ever set, so vault users know the worst case up front. The owner also
+///         registers which assets vaults may hold: each registration deploys an immutable ChainlinkAdapter for the
+///         (token, feed, maxStale) triple and points the token at it. Re-registering a token only affects vaults
+///         created afterwards; existing vaults keep the valuer they launched with.
 contract IndexConfig is Ownable2Step {
     uint256 public constant MAX_THRESHOLD_BPS = 1_000; // rebalances gated by at most 10% drift
     uint256 public constant MAX_INCENTIVE_BPS = 100; // a rebalancer keeps at most 1% of the misplaced value
@@ -21,6 +28,11 @@ contract IndexConfig is Ownable2Step {
     uint256 public redeemFeeBps; // share of redeemed INDEX kept as a fee; 0 = disabled
     address public feeRecipient; // receives the fee as INDEX
 
+    /// @notice Valuer new vaults must use for a token; zero means the asset is not allowed.
+    mapping(address token => IValuer) public valuerOf;
+    /// @notice Every token ever registered, for discovery (check `valuerOf` for the current valuer).
+    address[] public registered;
+
     event ConfigSet(
         uint256 thresholdBps,
         uint256 incentiveBps,
@@ -29,6 +41,8 @@ contract IndexConfig is Ownable2Step {
         uint256 redeemFeeBps,
         address indexed feeRecipient
     );
+
+    event AssetRegistered(address indexed token, address indexed valuer, address feed, uint256 maxStale);
 
     error OutOfRange();
 
@@ -50,5 +64,28 @@ contract IndexConfig is Ownable2Step {
         (thresholdBps, incentiveBps, creatorShareBps, rebalanceInterval, redeemFeeBps, feeRecipient) =
         (thresholdBps_, incentiveBps_, creatorShareBps_, rebalanceInterval_, redeemFeeBps_, feeRecipient_);
         emit ConfigSet(thresholdBps_, incentiveBps_, creatorShareBps_, rebalanceInterval_, redeemFeeBps_, feeRecipient_);
+    }
+
+    /// @notice Allow `token` in new vaults, priced by a fresh immutable ChainlinkAdapter over `feed`. Deterministic:
+    ///         the same triple always yields the same adapter address, so registering it twice is a no-op deploy.
+    function registerAsset(IERC20Metadata token, IAggregatorV3 feed, uint256 maxStale)
+        external
+        onlyOwner
+        returns (ChainlinkAdapter adapter)
+    {
+        bytes32 salt = keccak256(abi.encode(token, feed, maxStale));
+        address predicted = Create2.computeAddress(
+            salt, keccak256(abi.encodePacked(type(ChainlinkAdapter).creationCode, abi.encode(token, feed, maxStale)))
+        );
+        adapter = predicted.code.length > 0
+            ? ChainlinkAdapter(predicted)
+            : new ChainlinkAdapter{salt: salt}(token, feed, maxStale);
+        if (address(valuerOf[address(token)]) == address(0)) registered.push(address(token));
+        valuerOf[address(token)] = adapter;
+        emit AssetRegistered(address(token), address(adapter), address(feed), maxStale);
+    }
+
+    function registeredAssets() external view returns (address[] memory) {
+        return registered;
     }
 }

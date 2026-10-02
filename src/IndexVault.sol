@@ -27,15 +27,22 @@ interface IRebalancer {
 ///    fraction of the current imbalance. The index creator earns a configured cut of whatever the
 ///    rebalancer kept, minted as INDEX, without raising the cost to holders.
 ///  Threshold, incentive, minimum block interval between rebalances and an optional redeem fee are read
-///  live from a shared IndexConfig whose owner can change them within hard caps. The vault itself has no
+///  live from a shared IndexConfig whose owner can change them within hard caps; the same config curates
+///  which assets a vault may hold and which immutable valuer prices each one. The vault itself has no
 ///  owner and no upgradeability; changing a price source means creating a successor vault.
 contract IndexVault is ERC20, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    /// @notice Constructor input: which registered token, at what weight.
+    struct AssetInput {
+        IERC20 token;
+        uint256 weightBps; // target share of NAV; all weights must sum to 10_000
+    }
+
     struct Asset {
         IERC20 token;
         IValuer valuer; // prices `token` in USD (18 decimals); fixed for the vault's life
-        uint256 weightBps; // target share of NAV; all weights must sum to 10_000
+        uint256 weightBps;
     }
 
     uint256 private constant BPS = 10_000;
@@ -55,7 +62,7 @@ contract IndexVault is ERC20, ReentrancyGuard {
 
     error InvalidWeights();
     error DuplicateAsset();
-    error WrongValuer();
+    error UnknownAsset();
     error ZeroCreator();
     error LengthMismatch();
     error ZeroAmount();
@@ -67,7 +74,7 @@ contract IndexVault is ERC20, ReentrancyGuard {
     constructor(
         string memory name_,
         string memory symbol_,
-        Asset[] memory assets_,
+        AssetInput[] memory assets_,
         IndexConfig config_,
         address creator_
     ) ERC20(name_, symbol_) {
@@ -76,14 +83,15 @@ contract IndexVault is ERC20, ReentrancyGuard {
         creator = creator_;
         uint256 totalWeight;
         for (uint256 i; i < assets_.length; ++i) {
-            Asset memory a = assets_[i];
+            AssetInput memory a = assets_[i];
             if (a.weightBps == 0) revert InvalidWeights();
-            if (a.valuer.token() != address(a.token)) revert WrongValuer();
+            IValuer valuer = config_.valuerOf(address(a.token)); // the curated registry decides what vaults may hold
+            if (address(valuer) == address(0)) revert UnknownAsset();
             for (uint256 j; j < i; ++j) {
                 if (address(assets_[j].token) == address(a.token)) revert DuplicateAsset();
             }
             totalWeight += a.weightBps;
-            assets.push(a);
+            assets.push(Asset({token: a.token, valuer: valuer, weightBps: a.weightBps}));
         }
         if (totalWeight != BPS) revert InvalidWeights();
     }

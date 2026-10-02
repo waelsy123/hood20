@@ -3,7 +3,9 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ChainlinkAdapter} from "../src/ChainlinkAdapter.sol";
 import {IndexConfig} from "../src/IndexConfig.sol";
+import {MockFeed, MockToken} from "./Mocks.sol";
 
 contract IndexConfigTest is Test {
     IndexConfig config;
@@ -58,5 +60,29 @@ contract IndexConfigTest is Test {
         vm.prank(treasury);
         config.acceptOwnership();
         assertEq(config.owner(), treasury);
+    }
+
+    function test_RegisterAssetIsOwnerOnlyDeterministicAndIdempotent() public {
+        MockToken weth = new MockToken("WETH", 18);
+        MockFeed feed = new MockFeed(8, 2500e8);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
+        config.registerAsset(weth, feed, 90_000);
+
+        vm.startPrank(owner);
+        ChainlinkAdapter a = config.registerAsset(weth, feed, 90_000);
+        assertEq(a.token(), address(weth));
+        assertEq(address(config.valuerOf(address(weth))), address(a));
+        assertEq(config.registeredAssets().length, 1);
+
+        ChainlinkAdapter again = config.registerAsset(weth, feed, 90_000); // same triple: same adapter, no new entry
+        assertEq(address(again), address(a));
+        assertEq(config.registeredAssets().length, 1);
+
+        MockFeed otherFeed = new MockFeed(8, 2600e8);
+        ChainlinkAdapter b = config.registerAsset(weth, otherFeed, 3_600); // new triple: new adapter, same list
+        assertTrue(address(b) != address(a));
+        assertEq(address(config.valuerOf(address(weth))), address(b));
+        assertEq(config.registeredAssets().length, 1);
+        vm.stopPrank();
     }
 }

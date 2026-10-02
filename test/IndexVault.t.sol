@@ -55,26 +55,27 @@ contract IndexVaultTest is Test {
 
     // ───────────────────────────── helpers ─────────────────────────────
 
-    function _new(string memory name, string memory symbol, IndexVault.Asset[] memory assets_)
+    function _new(string memory name, string memory symbol, IndexVault.AssetInput[] memory assets_)
         internal
         returns (IndexVault)
     {
         return new IndexVault(name, symbol, assets_, config, creator);
     }
 
-    /// An asset backed by a fresh ChainlinkAdapter with a 25h staleness limit.
-    function _asset(MockToken token, MockFeed feed, uint256 weightBps) internal returns (IndexVault.Asset memory) {
-        return IndexVault.Asset({token: token, valuer: new ChainlinkAdapter(token, feed, 90_000), weightBps: weightBps});
+    /// Registers `token` in the config (idempotent; 25h staleness) and returns the vault input for it.
+    function _asset(MockToken token, MockFeed feed, uint256 weightBps) internal returns (IndexVault.AssetInput memory) {
+        config.registerAsset(token, feed, 90_000);
+        return IndexVault.AssetInput({token: token, weightBps: weightBps});
     }
 
-    function _twoAssets(uint256 w0, uint256 w1) internal returns (IndexVault.Asset[] memory a) {
-        a = new IndexVault.Asset[](2);
+    function _twoAssets(uint256 w0, uint256 w1) internal returns (IndexVault.AssetInput[] memory a) {
+        a = new IndexVault.AssetInput[](2);
         a[0] = _asset(weth, feedWeth, w0);
         a[1] = _asset(stock, feedStock, w1);
     }
 
-    function _threeAssets(uint256 w0, uint256 w1, uint256 w2) internal returns (IndexVault.Asset[] memory a) {
-        a = new IndexVault.Asset[](3);
+    function _threeAssets(uint256 w0, uint256 w1, uint256 w2) internal returns (IndexVault.AssetInput[] memory a) {
+        a = new IndexVault.AssetInput[](3);
         a[0] = _asset(weth, feedWeth, w0);
         a[1] = _asset(stock, feedStock, w1);
         a[2] = _asset(usdg, feedUsdg, w2);
@@ -149,28 +150,27 @@ contract IndexVaultTest is Test {
     // ───────────────────────────── construction ─────────────────────────────
 
     function test_ConstructorValidatesWeightsDuplicatesAndValuers() public {
-        IndexVault.Asset[] memory badSum = _twoAssets(5000, 4000); // helpers deploy adapters: build first
+        IndexVault.AssetInput[] memory badSum = _twoAssets(5000, 4000); // helpers register assets: build first
         vm.expectRevert(IndexVault.InvalidWeights.selector);
         _new("x", "x", badSum);
 
-        IndexVault.Asset[] memory zeroWeight = _twoAssets(10_000, 0);
+        IndexVault.AssetInput[] memory zeroWeight = _twoAssets(10_000, 0);
         vm.expectRevert(IndexVault.InvalidWeights.selector);
         _new("x", "x", zeroWeight);
 
-        IndexVault.Asset[] memory dup = _twoAssets(5000, 5000);
+        IndexVault.AssetInput[] memory dup = _twoAssets(5000, 5000);
         dup[1].token = weth;
-        dup[1].valuer = dup[0].valuer;
         vm.expectRevert(IndexVault.DuplicateAsset.selector);
         _new("x", "x", dup);
 
-        IndexVault.Asset[] memory ok = _twoAssets(5000, 5000);
+        IndexVault.AssetInput[] memory ok = _twoAssets(5000, 5000);
         vm.expectRevert(IndexVault.ZeroCreator.selector);
         new IndexVault("x", "x", ok, config, address(0));
 
-        IndexVault.Asset[] memory wrong = _twoAssets(5000, 5000);
-        wrong[1].valuer = wrong[0].valuer; // a WETH valuer paired with the stock token
-        vm.expectRevert(IndexVault.WrongValuer.selector);
-        _new("x", "x", wrong);
+        IndexVault.AssetInput[] memory rogue = _twoAssets(5000, 5000);
+        rogue[1].token = new MockToken("ROGUE", 18); // never registered by the config owner
+        vm.expectRevert(IndexVault.UnknownAsset.selector);
+        _new("x", "x", rogue);
 
         IndexVault v = _new("x", "x", _threeAssets(5000, 3000, 2000));
         assertEq(v.assetCount(), 3);
@@ -179,6 +179,13 @@ contract IndexVaultTest is Test {
         assertEq(address(token), address(usdg));
         assertEq(weight, 2000);
         assertEq(ChainlinkAdapter(address(valuer)).scale(), 1e14); // 6 token decimals + 8 feed decimals
+
+        // Re-registering an asset only affects vaults created afterwards; this one keeps its valuer.
+        MockFeed otherFeed = new MockFeed(8, 1e8);
+        config.registerAsset(usdg, otherFeed, 3_600);
+        (, IValuer still,) = v.assets(2);
+        assertEq(address(still), address(valuer));
+        assertTrue(address(config.valuerOf(address(usdg))) != address(valuer));
     }
 
     // ───────────────────────────── deposit / redeem ─────────────────────────────

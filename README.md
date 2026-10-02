@@ -10,13 +10,12 @@ and [`IndexConfig`](src/IndexConfig.sol) holds the owner-managed settings every 
 
 ## How it works
 
-Assets are passed to the constructor as an array of structs; the weights must sum to 100% and each valuer must
-be bound to its token:
+Assets are passed to the constructor as an array of structs; the weights must sum to 100% and every token must
+be registered in the shared config, which supplies the immutable valuer the vault stores for its whole life:
 
 ```solidity
-struct Asset {
-    IERC20 token;        // the ERC-20 held
-    IValuer valuer;      // prices it in USD (18 decimals); immutable for the vault's life
+struct AssetInput {
+    IERC20 token;        // a token the config owner has registered
     uint256 weightBps;   // target share of NAV; all weights sum to 10_000
 }
 ```
@@ -53,10 +52,15 @@ $7,500 of stock and takes $7,537.50 of WETH with pull-rights over WETH only; the
 WETH, far inside the tolerance (`test_RebalanceBriefStyleExchangeKeepsTheIncentive`). With three assets one callback
 settles all of them (`test_ThreeAssets_RebalanceLandsOnTargetKeepingTheIncentive`).
 
-## Price sources
+## Price sources and the asset registry
 
 The vault never talks to an oracle directly. Each asset carries an [`IValuer`](src/IValuer.sol), one immutable
-contract that answers `valueOf(amount)` in USD and must revert when its source is stale, invalid or closed:
+contract that answers `valueOf(amount)` in USD and must revert when its source is stale, invalid or closed. The
+config owner curates them: `IndexConfig.registerAsset(token, feed, maxStale)` deploys a `ChainlinkAdapter` for the
+triple at a deterministic address (registering the same triple again is a no-op) and records it as the token's
+valuer. New vaults may only hold registered tokens and copy the valuer at construction, so re-registering a token
+with a new feed changes nothing for vaults that already exist. `script/RegisterAssets.s.sol` registers every
+verified pair from the feed directory in one run:
 
 ```solidity
 interface IValuer {
@@ -65,8 +69,8 @@ interface IValuer {
 }
 ```
 
-[`ChainlinkAdapter`](src/ChainlinkAdapter.sol) is the shipped implementation: one per (token, feed), holding the
-decimals scale and a `maxStale` limit capped at 7 days. Robinhood Chain's equity feeds publish nothing from
+[`ChainlinkAdapter`](src/ChainlinkAdapter.sol) is the shipped implementation: one per (token, feed, maxStale),
+holding the decimals scale and a `maxStale` limit capped at 7 days. Robinhood Chain's equity feeds publish nothing from
 Friday's last tick until Sunday 8pm ET (52 to 76 hour gaps measured, holidays included) while on-chain pools
 keep trading, so the suggested `maxStale` of 90,000 s (25 h) makes vaults fail closed over weekends. Do not
 raise it past the weekend gap. Swapping a source (Chainlink Data Streams with a market-status flag, a TWAP for a
@@ -106,10 +110,13 @@ can never take more than 5% of a redemption or hand rebalancers more than 1% of 
 ## Security properties
 
 - **Minimal trust, bounded by constants.** The vault and factory have no owner and no upgradeability; the asset
-  list and weights are fixed at construction (weights must sum to 100%, no zero weights, no duplicate tokens).
-  The only privileged party is the config owner, who can move the threshold, incentive, creator share, interval
-  and redeem fee within the hard caps above and nothing else. Ownership transfers are two-step. The index creator
-  is recorded at launch and only ever receives newly minted INDEX; it has no powers.
+  list and weights are fixed at construction (weights must sum to 100%, no zero weights, no duplicate tokens,
+  only registered tokens). The only privileged party is the config owner, who can move the threshold, incentive,
+  creator share, interval and redeem fee within the hard caps above and register assets for future vaults, and
+  nothing else: no setting or registration can touch a vault that already exists. Ownership transfers are
+  two-step. The index creator is recorded at launch and only ever receives newly minted INDEX; it has no powers.
+- **Only curated assets.** Because vaults resolve valuers from the registry, nobody can launch a vault on a fake
+  token or a fake feed through the factory; the catalog users see is the one enforced on-chain.
 - **Deposits/redemptions are pro-rata in every asset**, so they cannot tilt the portfolio and never touch oracle
   prices. That closes the classic "mint with the stale-priced asset, redeem the others" oracle-latency arbitrage
   that value-based single-asset minting would open. The only oracle-priced mint is the very first one.
@@ -160,7 +167,7 @@ Regenerate with `cd web && node scripts/feeds.mjs`; the dapp's curated catalog r
 
 | Call | Gas | USD today |
 |---|---|---|
-| `factory.create` (deploy + seed; adapters deployed beforehand) | ~3.31M | $0.37 |
+| `factory.create` (deploy + seed; assets registered beforehand) | ~3.33M | $0.37 |
 | `deposit` | ~289k | $0.032 |
 | `redeem` | ~247k | $0.028 |
 | `rebalance` (10 assets listed, callback moves all 10, creator paid) | ~671k | $0.075 |
@@ -182,7 +189,7 @@ the ABIs from the Forge artifacts so the dapp can never drift from the contracts
 
 ```sh
 forge build
-forge test -vv          # 26 tests incl. two fuzz properties (1,000 runs each)
+forge test -vv          # 27 tests incl. two fuzz properties (1,000 runs each)
 forge fmt --check
 slither .               # optional static analysis
 ```
@@ -190,10 +197,11 @@ slither .               # optional static analysis
 ## Deploy to Robinhood Chain (chain id 4663)
 
 ```sh
-cp .env.example .env    # OWNER for the config; FACTORY, ASSETS, FEEDS, WEIGHTS_BPS, SEED_AMOUNTS for a vault
+cp .env.example .env    # OWNER for the config; CONFIG to register assets; FACTORY, ASSETS, WEIGHTS_BPS, SEED_AMOUNTS for a vault
 source .env
 forge script script/DeployFactory.s.sol --rpc-url robinhood --account <keystore-name> --broadcast   # config + factory, once
-forge script script/CreateVault.s.sol --rpc-url robinhood --account <keystore-name> --broadcast     # adapters + one seeded vault
+forge script script/RegisterAssets.s.sol --rpc-url robinhood --account <keystore-name> --broadcast  # adapters for every verified feed, once
+forge script script/CreateVault.s.sol --rpc-url robinhood --account <keystore-name> --broadcast     # one seeded vault
 ```
 
 WETH on Robinhood Chain: `0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73` (from Uniswap v2 Router02.WETH()).

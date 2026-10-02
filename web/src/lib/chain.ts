@@ -1,5 +1,5 @@
 import { createPublicClient, createWalletClient, custom, defineChain, http, type Address, type WalletClient } from "viem";
-import { ADDRESSES, CHAIN, CURATED_ASSETS } from "../config";
+import { ADDRESSES, CHAIN } from "../config";
 import { ChainlinkAdapterAbi, IndexConfigAbi, IndexVaultAbi, IndexVaultFactoryAbi, erc20Abi } from "../abi";
 import type { ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
 
@@ -99,12 +99,21 @@ export class ChainSource implements Source {
     return { address, creator, name, symbol, totalSupply, nav, deviationBps: Number(deviationBps), lastRebalanceBlock, assets };
   }
 
+  /** The config's curated registry is the catalog: every registered token with its current valuer and price. */
   async listAssets(): Promise<CuratedAsset[]> {
+    const tokens = await publicClient.readContract({ address: ADDRESSES.config, abi: IndexConfigAbi, functionName: "registeredAssets" });
     return Promise.all(
-      CURATED_ASSETS.map(async (a) => ({
-        ...a,
-        unitValue: await publicClient.readContract({ address: a.valuer, abi: ChainlinkAdapterAbi, functionName: "valueOf", args: [10n ** BigInt(a.decimals)] }),
-      })),
+      tokens.map(async (token) => {
+        const t = { address: token, abi: erc20Abi } as const;
+        const [valuer, symbol, name, decimals] = await Promise.all([
+          publicClient.readContract({ address: ADDRESSES.config, abi: IndexConfigAbi, functionName: "valuerOf", args: [token] }),
+          publicClient.readContract({ ...t, functionName: "symbol" }),
+          publicClient.readContract({ ...t, functionName: "name" }),
+          publicClient.readContract({ ...t, functionName: "decimals" }),
+        ]);
+        const unitValue = await publicClient.readContract({ address: valuer, abi: ChainlinkAdapterAbi, functionName: "valueOf", args: [10n ** BigInt(decimals)] });
+        return { key: symbol, symbol, name: name.replace(" • Robinhood Token", ""), token, valuer, decimals, unitValue };
+      }),
     );
   }
 
@@ -122,7 +131,7 @@ export class ChainSource implements Source {
         await publicClient.waitForTransactionReceipt({ hash: h });
       }
     }
-    const assets = input.picks.map((p) => ({ token: p.asset.token, valuer: p.asset.valuer, weightBps: BigInt(p.weightBps) }));
+    const assets = input.picks.map((p) => ({ token: p.asset.token, weightBps: BigInt(p.weightBps) }));
     const hash = await wc.writeContract({ account: user, chain: robinhoodChain, address: ADDRESSES.factory, abi: IndexVaultFactoryAbi, functionName: "create", args: [input.name, input.symbol, assets, input.seedAmounts] });
     await publicClient.waitForTransactionReceipt({ hash });
     const all = await publicClient.readContract({ address: ADDRESSES.factory, abi: IndexVaultFactoryAbi, functionName: "all" });

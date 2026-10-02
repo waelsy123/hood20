@@ -11,6 +11,8 @@ remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
 ]
 
+fs_permissions = [{ access = "read", path = "./data" }]
+
 [fuzz]
 runs = 1_000
 
@@ -21,5 +23,5 @@ robinhood_testnet = "https://rpc.testnet.chain.robinhood.com"
 [lint]
 # Immutables use mixedCase so the public getters read naturally (assetA(), feedA(), ...).
 # unwrapped-modifier-logic: `lending` is deliberately a pre/post modifier (allow max, body, allow zero, verify).
-exclude_lints = ["screaming-snake-case-immutable", "unwrapped-modifier-logic"]
+exclude_lints = ["screaming-snake-case-immutable", "unwrapped-modifier-logic", "asm-keccak256"]
 ignore = ["test/*", "script/*"]

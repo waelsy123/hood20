@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {Test, console2} from "forge-std/Test.sol";
-import {ChainlinkAdapter} from "../src/ChainlinkAdapter.sol";
 import {IndexConfig} from "../src/IndexConfig.sol";
 import {IValuer} from "../src/IValuer.sol";
 import {IndexVault} from "../src/IndexVault.sol";
@@ -27,14 +26,14 @@ contract GasTest is Test {
         for (uint256 i; i < N; ++i) {
             tokens.push(new MockToken("T", i % 2 == 0 ? 18 : 6)); // mixed decimals
             feeds.push(new MockFeed(8, int256(100e8 * (i + 1)))); // $100, $200, ... $1,000
-            valuers.push(new ChainlinkAdapter(tokens[i], feeds[i], 90_000));
+            valuers.push(config.registerAsset(tokens[i], feeds[i], 90_000));
         }
     }
 
-    function _configs() internal view returns (IndexVault.Asset[] memory a) {
-        a = new IndexVault.Asset[](N);
+    function _configs() internal view returns (IndexVault.AssetInput[] memory a) {
+        a = new IndexVault.AssetInput[](N);
         for (uint256 i; i < N; ++i) {
-            a[i] = IndexVault.Asset({token: tokens[i], valuer: valuers[i], weightBps: 1_000});
+            a[i] = IndexVault.AssetInput({token: tokens[i], weightBps: 1_000});
         }
     }
 
