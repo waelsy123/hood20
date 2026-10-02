@@ -115,9 +115,9 @@ export class MockSource implements Source {
       allowances: vault.assets.map((a) => this.w.allowances.get(`${vault.address}:${a.token}`) ?? 0n),
     };
   }
-  async approve(vault: VaultInfo, i: number, amount: bigint): Promise<TxResult> {
+  async approve(vault: VaultInfo, i: number, _amount: bigint): Promise<TxResult> {
     await sleep(600);
-    this.w.allowances.set(`${vault.address}:${vault.assets[i].token}`, amount);
+    this.w.allowances.set(`${vault.address}:${vault.assets[i].token}`, 2n ** 256n - 1n); // unlimited, like the chain source
     return { hash: hash() };
   }
   async deposit(vault: VaultInfo, maxAmounts: bigint[], minShares: bigint): Promise<TxResult> {
@@ -135,7 +135,8 @@ export class MockSource implements Source {
       if (bal < amt) throw new Error(`Insufficient ${a.symbol} balance`);
       if ((this.w.allowances.get(`${v.address}:${a.token}`) ?? 0n) < amt) throw new Error(`${a.symbol} not approved`);
       this.w.wallet.set(a.token, bal - amt);
-      this.w.allowances.set(`${v.address}:${a.token}`, 0n);
+      const allowance = this.w.allowances.get(`${v.address}:${a.token}`) ?? 0n;
+      if (allowance < 2n ** 255n) this.w.allowances.set(`${v.address}:${a.token}`, allowance - amt);
       a.balance += amt;
       a.value = (a.balance * a.unitValue) / 10n ** BigInt(a.decimals);
     });

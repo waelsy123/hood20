@@ -13,6 +13,7 @@ export const robinhoodChain = defineChain({
 });
 
 export const publicClient = createPublicClient({ chain: robinhoodChain, transport: http(CHAIN.rpc) });
+const MAX_UINT256 = 2n ** 256n - 1n;
 
 type Eip1193 = { request: (a: { method: string; params?: unknown[] }) => Promise<unknown>; on?: Function; removeListener?: Function };
 export function injected(): Eip1193 | undefined {
@@ -134,7 +135,8 @@ export class ChainSource implements Source {
       const a = input.picks[i].asset;
       const allowance = await publicClient.readContract({ address: a.token, abi: erc20Abi, functionName: "allowance", args: [user, ADDRESSES.factory] });
       if (allowance < input.seedAmounts[i]) {
-        const h = await wc.writeContract({ account: user, chain: robinhoodChain, address: a.token, abi: erc20Abi, functionName: "approve", args: [ADDRESSES.factory, input.seedAmounts[i]] });
+        // unlimited: the factory only pulls inside the caller's own create(), and one approval per asset is enough for life
+        const h = await wc.writeContract({ account: user, chain: robinhoodChain, address: a.token, abi: erc20Abi, functionName: "approve", args: [ADDRESSES.factory, MAX_UINT256] });
         await publicClient.waitForTransactionReceipt({ hash: h });
       }
     }
@@ -152,8 +154,9 @@ export class ChainSource implements Source {
     return { shares, balances, allowances };
   }
 
-  approve(vault: VaultInfo, i: number, amount: bigint, user: Address) {
-    return send(user, () => wallet().writeContract({ account: user, chain: robinhoodChain, address: vault.assets[i].token, abi: erc20Abi, functionName: "approve", args: [vault.address, amount] }));
+  /** Unlimited approval: the vault only pulls inside the caller's own deposit(), so one approval per asset lasts. */
+  approve(vault: VaultInfo, i: number, _amount: bigint, user: Address) {
+    return send(user, () => wallet().writeContract({ account: user, chain: robinhoodChain, address: vault.assets[i].token, abi: erc20Abi, functionName: "approve", args: [vault.address, MAX_UINT256] }));
   }
   deposit(vault: VaultInfo, maxAmounts: bigint[], minShares: bigint, user: Address) {
     return send(user, () => wallet().writeContract({ account: user, chain: robinhoodChain, address: vault.address, abi: IndexVaultAbi, functionName: "deposit", args: [maxAmounts, minShares, user] }));

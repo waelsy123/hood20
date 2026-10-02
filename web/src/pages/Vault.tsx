@@ -317,11 +317,11 @@ export function Vault({ address }: { address: Address }) {
                 {pay === "usdg" ? (
                   <p className="muted small">
                     Uniswap routes each constituent and your wallet sends one router transaction that buys exactly what the vault pulls, then one
-                    deposit. Two one-time approvals (USDG to Permit2, Permit2 to the router) and a per-asset approval to the vault are requested
-                    when missing.{MOCK ? " Demo mode fills at the Chainlink price plus 0.3%." : ""}
+                    deposit. The first time only, approvals are requested: USDG to Permit2, Permit2 to the router, and each constituent to the
+                    vault. After that a deposit is two transactions.{MOCK ? " Demo mode fills at the Chainlink price plus 0.3%." : ""}
                   </p>
                 ) : (
-                  <p className="muted small">Deposits pull every asset in the vault's current ratio. Approvals are requested per asset, then one deposit call.</p>
+                  <p className="muted small">Deposits pull every asset in the vault's current ratio. A one-time approval per asset, then one deposit call.</p>
                 )}
                 {!wallet.address ? (
                   <button className="btn primary" onClick={() => wallet.connect().catch((e) => setError((e as Error).message))}>Connect wallet</button>
