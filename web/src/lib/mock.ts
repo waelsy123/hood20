@@ -3,7 +3,6 @@ import type { AssetInfo, ConfigInfo, CreateInput, CuratedAsset, Position, Source
 import { depositAmounts, redeemAmounts, gaps } from "./math";
 import { CHAIN, CURATED_ASSETS } from "../config";
 
-
 export const DEMO_USER: Address = "0xD3110000000000000000000000000000000000d0";
 const CONFIG_ADDR: Address = "0xC0DF000000000000000000000000000000000001";
 const TEAM: Address = "0x7EA0000000000000000000000000000000000001";
@@ -21,6 +20,64 @@ const CATALOG: (CuratedAsset & { price: number })[] = CURATED_ASSETS.map((a, i) 
   valuer: addr(0xb0, i + 1),
   unitValue: parseUnits(a.price.toFixed(8), 18),
 }));
+
+const byKey = (k: string) => CATALOG.find((a) => a.key === k)!;
+
+/** Holding worth `navUsd * weightBps / 1e4` at today's price, times `drift` (1 = exactly on target). */
+function holding(key: string, weightBps: number, navUsd: number, drift = 1): AssetInfo {
+  const a = byKey(key);
+  const units = ((navUsd * weightBps) / 10_000 / a.price) * drift;
+  const balance = parseUnits(units.toFixed(6), a.decimals);
+  return {
+    token: a.token,
+    valuer: a.valuer,
+    weightBps,
+    symbol: a.symbol,
+    name: a.name,
+    decimals: a.decimals,
+    balance,
+    value: (balance * a.unitValue) / 10n ** BigInt(a.decimals),
+    unitValue: a.unitValue,
+  };
+}
+
+function withNav(v: Omit<VaultInfo, "nav" | "deviationBps">): VaultInfo {
+  const nav = v.assets.reduce((s, a) => s + a.value, 0n);
+  const full = { ...v, nav, deviationBps: 0 };
+  full.deviationBps = gaps(full).maxBps;
+  return full;
+}
+
+const START_BLOCK = 72_400_000n;
+const START_MS = Date.now();
+export function mockBlock(): bigint {
+  return START_BLOCK + BigInt(Math.floor((Date.now() - START_MS) / 1000 / CHAIN.blockTimeSeconds));
+}
+
+/** In-memory world for demo mode. Balances move exactly like the contracts would. */
+class World {
+  config: ConfigInfo = {
+    address: CONFIG_ADDR,
+    owner: "0x0000000000000000000000000000000000000ADD",
+    thresholdBps: 50,
+    incentiveBps: 50,
+    creatorShareBps: 1_000,
+    rebalanceInterval: 18_000,
+    redeemFeeBps: 0,
+    feeRecipient: "0x0000000000000000000000000000000000000000",
+  };
+  vaults: VaultInfo[] = [
+    withNav({
+      address: "0x20A0000000000000000000000000000000000001",
+      creator: TEAM,
+      name: "hood20 Core",
+      symbol: "h20CORE",
+      totalSupply: parseUnits("1200000", 18),
+      lastRebalanceBlock: START_BLOCK - 21_000n,
+      // ~$1.2M: SPY 30 / NVDA 20 / AAPL 15 / MSFT 15 / AMZN 10 / GOOGL 10 at today's feed prices, NVDA a touch rich
+      assets: [holding("SPY", 3000, 1_200_000), holding("NVDA", 2000, 1_200_000, 1.011), holding("AAPL", 1500, 1_200_000, 0.997), holding("MSFT", 1500, 1_200_000), holding("AMZN", 1000, 1_200_000, 0.996), holding("GOOGL", 1000, 1_200_000)],
+    }),
+  ];
   shares = new Map<string, bigint>([[this.vaults[0].address, parseUnits("25000", 18)]]);
   // the demo wallet holds about $25,000 of every asset
   wallet = new Map<string, bigint>(CATALOG.map((a) => [a.token, parseUnits((25_000 / a.price).toFixed(6), a.decimals)]));
