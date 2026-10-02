@@ -8,6 +8,7 @@ import { Link } from "../lib/router";
 import { rebalanceState } from "../lib/status";
 import type { BuyQuote, Position, VaultInfo } from "../lib/types";
 import { StatePill } from "./Vaults";
+import { ConfigOwnerPanel } from "../components/ConfigOwnerPanel";
 
 function parseDecimal(s: string, decimals: number): bigint | null {
   if (!s.trim()) return null;
@@ -375,6 +376,7 @@ export function Vault({ address }: { address: Address }) {
               </dl>
             </div>
           )}
+          <ConfigOwnerPanel />
         </div>
       </div>
     </main>
