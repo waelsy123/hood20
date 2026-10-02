@@ -9,8 +9,11 @@ import {IndexVaultFactory} from "../src/IndexVaultFactory.sol";
 ///         forge script script/DeployFactory.s.sol --rpc-url robinhood --account <name> --broadcast
 contract DeployFactory is Script {
     function run() external returns (IndexConfig config, IndexVaultFactory factory) {
-        address owner = vm.envOr("OWNER", msg.sender);
         vm.startBroadcast();
+        // Outside the broadcast, msg.sender is Foundry's default script sender (0x1804…1f38), not the keystore: an
+        // IndexConfig owned by it can never register assets. Read the real broadcaster instead.
+        (, address broadcaster,) = vm.readCallers();
+        address owner = vm.envOr("OWNER", broadcaster);
         config = new IndexConfig(owner);
         factory = new IndexVaultFactory(config);
         vm.stopBroadcast();

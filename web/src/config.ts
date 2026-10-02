@@ -18,8 +18,9 @@ export const CHAIN = {
  * mocked vaults so the whole flow can be exercised. Set them after `DeployFactory.s.sol` and reload.
  */
 export const ADDRESSES: { factory: Address; config: Address } = {
-  factory: ZERO,
-  config: ZERO,
+  // Deployed 2026-10-02 (block 78306880 area) by 0xDf62…49E7; IndexConfig ownership handed to 0x3FB9…3D58.
+  factory: "0x0a9c469B0f56EDb6a7d67bDB71a76567F6cae2B1",
+  config: "0x543A25b213ABa3aCce7747B392273a4751B5D297",
 };
 
 export const MOCK = ADDRESSES.factory === ZERO;
