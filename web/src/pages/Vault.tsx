@@ -48,9 +48,10 @@ export function Vault({ address }: { address: Address }) {
         setUsdgBal(null);
       }
     } catch (e) {
-      setError((e as Error).message);
+      if (v === null) setError((e as Error).message); // keep the last good data on a failed background refresh
+      else console.warn("vault refresh failed", e);
     }
-  }, [source, address, wallet.address, setError]);
+  }, [source, address, wallet.address, setError, v]);
 
   useEffect(() => {
     void refresh();
@@ -187,7 +188,10 @@ export function Vault({ address }: { address: Address }) {
         <div>
           <Link to="/app" className="muted small">← all vaults</Link>
           <h2 style={{ marginTop: 6 }}>{v.name} <span className="muted mono small">{v.symbol}</span></h2>
-          <span className="muted mono small">{v.address} · created by {short(v.creator)}</span>
+          <span className="muted mono small">
+            <a href={`${CHAIN.explorer}/address/${v.address}`} target="_blank" rel="noreferrer">{v.address}</a> · created by{" "}
+            <a href={`${CHAIN.explorer}/address/${v.creator}`} target="_blank" rel="noreferrer">{short(v.creator)}</a>
+          </span>
         </div>
         <StatePill v={v} />
       </div>
@@ -367,7 +371,7 @@ export function Vault({ address }: { address: Address }) {
                 <dt>Incentive</dt><dd>{pct(config.incentiveBps)} of misplaced value</dd>
                 <dt>Interval</dt><dd>{config.rebalanceInterval.toLocaleString()} blocks (~{blocksToTime(config.rebalanceInterval, CHAIN.blockTimeSeconds)})</dd>
                 <dt>Redeem fee</dt><dd>{config.redeemFeeBps === 0 ? "none" : pct(config.redeemFeeBps)}</dd>
-                <dt>Config</dt><dd className="small">{short(config.address)}</dd>
+                <dt>Config</dt><dd className="small"><a href={`${CHAIN.explorer}/address/${config.address}`} target="_blank" rel="noreferrer">{short(config.address)}</a></dd>
               </dl>
             </div>
           )}

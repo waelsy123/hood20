@@ -24,4 +24,5 @@ Fixed-weight index vaults on Robinhood Chain (chain id 4663). Contracts in `src/
 ## Conventions
 - Keep the contract, README and dapp math in sync: `web/src/lib/math.ts` mirrors `IndexVault` rounding (deposit ceil, redeem floor, gaps).
 - Do not hand-edit `web/src/abi.ts`.
+- `block.number` on Robinhood Chain is the Ethereum L1 block (~12 s), not the 0.1 s L2 block: `rebalanceInterval`/`lastRebalanceBlock` count L1 blocks (live config 150 ≈ 30 min; the contract default 18,000 would be ~60 h). The dapp reads the block via Multicall3.getBlockNumber and uses `CHAIN.blockTimeSeconds = 12`. Reads go through PublicNode with the official RPC as fallback, batched with Multicall3; the official RPC 429s after ~10 rapid calls.
 - Fleet runbook: `~/my-coolify-devops/server/README.md` § hood20.

@@ -1,5 +1,5 @@
 import { parseUnits, type Address } from "viem";
-import type { AssetInfo, BuyQuote, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
+import type { AssetInfo, BuyQuote, ConfigInfo, ConfigInput, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
 import { depositAmounts, redeemAmounts, gaps, mulDivCeil } from "./math";
 import { CHAIN, CURATED_ASSETS, USDG, isUsdg } from "../config";
 
@@ -48,7 +48,7 @@ function withNav(v: Omit<VaultInfo, "nav" | "deviationBps">): VaultInfo {
   return full;
 }
 
-const START_BLOCK = 72_400_000n;
+const START_BLOCK = 26_100_000n; // L1 block numbers, like the chain
 const START_MS = Date.now();
 export function mockBlock(): bigint {
   return START_BLOCK + BigInt(Math.floor((Date.now() - START_MS) / 1000 / CHAIN.blockTimeSeconds));
@@ -62,7 +62,7 @@ class World {
     thresholdBps: 50,
     incentiveBps: 50,
     creatorShareBps: 1_000,
-    rebalanceInterval: 18_000,
+    rebalanceInterval: 150, // ~30 min of L1 blocks, like the live config
     redeemFeeBps: 0,
     feeRecipient: "0x0000000000000000000000000000000000000000",
     pendingOwner: "0x0000000000000000000000000000000000000000",
@@ -175,6 +175,11 @@ export class MockSource implements Source {
   }
   async acceptConfigOwnership(_user: Address): Promise<TxResult> {
     throw new Error("No ownership transfer is pending in demo mode");
+  }
+  async setConfig(i: ConfigInput, _user: Address): Promise<TxResult> {
+    await sleep(600);
+    this.w.config = { ...this.w.config, ...i };
+    return { hash: hash() };
   }
   /** Demo "Uniswap": fills at the Chainlink price plus 30 bps, with the same 0.5% maximum as the real quotes. */
   async quoteBuy(vault: VaultInfo, legs: bigint[], _user: Address): Promise<BuyQuote> {

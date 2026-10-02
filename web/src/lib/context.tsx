@@ -33,7 +33,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setBlock(b);
         }
       } catch (e) {
-        if (alive) setError((e as Error).message);
+        // a failed background refresh keeps the last good data; only a failed first load is worth a banner
+        if (alive && config === null) setError((e as Error).message);
+        else console.warn("config refresh failed", e);
       }
     };
     void tick();

@@ -53,6 +53,16 @@ export type ConfigInfo = {
   pendingOwner: Address; // Ownable2Step: set by transferOwnership, cleared by acceptOwnership
 };
 
+/** The owner-settable parameters of IndexConfig.set, in the contract's order. */
+export type ConfigInput = {
+  thresholdBps: number;
+  incentiveBps: number;
+  creatorShareBps: number;
+  rebalanceInterval: number;
+  redeemFeeBps: number;
+  feeRecipient: Address;
+};
+
 export type Position = {
   shares: bigint;
   balances: bigint[]; // user's wallet balance of each asset
@@ -81,6 +91,8 @@ export interface Source {
   usdgBalance(user: Address): Promise<bigint>;
   /** Completes a two-step config ownership transfer; only the pending owner can call it. */
   acceptConfigOwnership(user: Address): Promise<TxResult>;
+  /** IndexConfig.set, owner only. */
+  setConfig(input: ConfigInput, user: Address): Promise<TxResult>;
   /** Quotes buying `legs[i]` of asset i with USDG (0 = nothing to buy) through Uniswap's Trading API. */
   quoteBuy(vault: VaultInfo, legs: bigint[], user: Address): Promise<BuyQuote>;
   /** Re-quotes, sets the one-time Permit2 approvals if missing, and buys every leg in ONE Universal Router call. */

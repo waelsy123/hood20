@@ -19,12 +19,14 @@ contract IndexConfig is Ownable2Step {
     uint256 public constant MAX_INCENTIVE_BPS = 100; // a rebalancer keeps at most 1% of the misplaced value
     uint256 public constant MAX_CREATOR_SHARE_BPS = 5_000; // an index creator earns at most half of what rebalancers keep
     uint256 public constant MAX_REDEEM_FEE_BPS = 500; // at most 5% of redeemed shares
-    uint256 public constant MAX_REBALANCE_INTERVAL = 1_000_000; // blocks (about 28 h at Robinhood Chain's 0.1 s blocks)
+    uint256 public constant MAX_REBALANCE_INTERVAL = 1_000_000; // blocks as contracts see them: on Robinhood Chain
+    // (Arbitrum stack) block.number is the Ethereum L1 block (~12 s), so this cap is about 139 days
 
     uint256 public thresholdBps = 50; // rebalance only when an asset is >= 0.5% of NAV off target
     uint256 public incentiveBps = 50; // holders pay at most 0.5% of the misplaced value per rebalance
     uint256 public creatorShareBps = 1_000; // the index creator earns 10% of what the rebalancer keeps, as INDEX
-    uint256 public rebalanceInterval = 18_000; // min blocks between two rebalances of a vault (~30 min); 0 = none
+    uint256 public rebalanceInterval = 18_000; // min blocks between two rebalances of a vault; 0 = none. NOTE: L1
+    // blocks on Robinhood Chain (~12 s), so this default is ~60 h; the live config is set to 150 (~30 min)
     uint256 public redeemFeeBps; // share of redeemed INDEX kept as a fee; 0 = disabled
     address public feeRecipient; // receives the fee as INDEX
 

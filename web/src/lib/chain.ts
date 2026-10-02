@@ -1,7 +1,7 @@
-import { createPublicClient, createWalletClient, custom, defineChain, http, type Address, type WalletClient } from "viem";
+import { createPublicClient, createWalletClient, custom, defineChain, fallback, http, parseAbi, type Address, type WalletClient } from "viem";
 import { ADDRESSES, CHAIN, UNISWAP, USDG, isUsdg } from "../config";
 import { ChainlinkAdapterAbi, IndexConfigAbi, IndexVaultAbi, IndexVaultFactoryAbi, erc20Abi } from "../abi";
-import type { BuyQuote, ConfigInfo, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
+import type { BuyQuote, ConfigInfo, ConfigInput, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
 import { MAX_UINT160, maxInput, mergeSwaps, permit2Abi, quoteExactOutput, swapTransaction, type ApiQuote } from "./uniswap";
 
 export const robinhoodChain = defineChain({
@@ -9,11 +9,19 @@ export const robinhoodChain = defineChain({
   name: CHAIN.name,
   nativeCurrency: CHAIN.nativeCurrency,
   rpcUrls: { default: { http: [CHAIN.rpc] } },
-  blockExplorers: { default: { name: "Explorer", url: CHAIN.explorer } },
+  blockExplorers: { default: { name: "Etherscan", url: CHAIN.explorer } },
+  contracts: { multicall3: { address: CHAIN.multicall3 } },
 });
 
-export const publicClient = createPublicClient({ chain: robinhoodChain, transport: http(CHAIN.rpc) });
+// Concurrent reads are folded into Multicall3 calls (one request per refresh instead of dozens); endpoints fall over
+// to the next one on failure.
+export const publicClient = createPublicClient({
+  chain: robinhoodChain,
+  transport: fallback(CHAIN.rpcRead.map((url) => http(url, { retryCount: 2, retryDelay: 300 }))),
+  batch: { multicall: { wait: 16 } },
+});
 const MAX_UINT256 = 2n ** 256n - 1n;
+const multicall3Abi = parseAbi(["function getBlockNumber() view returns (uint256)"]);
 
 type Eip1193 = { request: (a: { method: string; params?: unknown[] }) => Promise<unknown>; on?: Function; removeListener?: Function };
 export function injected(): Eip1193 | undefined {
@@ -37,8 +45,9 @@ async function send(user: Address, fn: () => Promise<`0x${string}`>): Promise<Tx
 export class ChainSource implements Source {
   readonly mock = false;
 
+  /** The block number contracts see (the L1 block on this rollup), which is what lastRebalanceBlock counts. */
   blockNumber() {
-    return publicClient.getBlockNumber();
+    return publicClient.readContract({ address: CHAIN.multicall3, abi: multicall3Abi, functionName: "getBlockNumber" });
   }
 
   async getConfig(): Promise<ConfigInfo> {
@@ -68,6 +77,19 @@ export class ChainSource implements Source {
 
   acceptConfigOwnership(user: Address) {
     return send(user, () => wallet().writeContract({ account: user, chain: robinhoodChain, address: ADDRESSES.config, abi: IndexConfigAbi, functionName: "acceptOwnership" }));
+  }
+
+  setConfig(i: ConfigInput, user: Address) {
+    return send(user, () =>
+      wallet().writeContract({
+        account: user,
+        chain: robinhoodChain,
+        address: ADDRESSES.config,
+        abi: IndexConfigAbi,
+        functionName: "set",
+        args: [BigInt(i.thresholdBps), BigInt(i.incentiveBps), BigInt(i.creatorShareBps), BigInt(i.rebalanceInterval), BigInt(i.redeemFeeBps), i.feeRecipient],
+      }),
+    );
   }
 
   async listVaults(): Promise<VaultInfo[]> {

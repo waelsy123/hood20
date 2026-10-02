@@ -99,7 +99,7 @@ applies to all of them:
 | `thresholdBps` | 50 (0.5%) | 1,000 | drift required before `rebalance` |
 | `incentiveBps` | 50 (0.5%) | 100 | what holders pay per rebalance, as a share of the misplaced value |
 | `creatorShareBps` | 1,000 (10%) | 5,000 | the index creator's cut of what the rebalancer kept, minted as INDEX |
-| `rebalanceInterval` | 18,000 blocks (~30 min on Robinhood Chain) | 1,000,000 | minimum blocks between two rebalances of a vault |
+| `rebalanceInterval` | 18,000 blocks (contract default); the live config is set to 150 | 1,000,000 | minimum blocks between two rebalances of a vault. `block.number` on Robinhood Chain (an Arbitrum-stack rollup) is the Ethereum L1 block, ~12 s, so 150 ≈ 30 min and the 18,000 default would be ~60 h |
 | `redeemFeeBps` | 0 (disabled) | 500 | slice of redeemed `INDEX` sent to `feeRecipient` instead of being burned |
 | `feeRecipient` | none | must be set when the fee is > 0 | receives the fee as `INDEX` |
 

@@ -7,10 +7,25 @@ export const ZERO: Address = "0x0000000000000000000000000000000000000000";
 export const CHAIN = {
   id: 4663,
   name: "Robinhood Chain",
-  rpc: "https://rpc.mainnet.chain.robinhood.com",
-  explorer: "https://explorer.mainnet.chain.robinhood.com",
+  rpc: "https://rpc.mainnet.chain.robinhood.com", // the official endpoint, used for wallet_addEthereumChain
+  // Reads go through PublicNode first (fast, tolerant of bursts) and fall back to the official RPC (429 after ~10
+  // rapid calls); every refresh is folded into one Multicall3 call.
+  rpcRead: ["https://robinhood-rpc.publicnode.com", "https://rpc.mainnet.chain.robinhood.com"],
+  multicall3: "0xcA11bde05977b3631167028862bE2a173976CA11" as Address,
+  explorer: "https://robin.etherscan.io", // Etherscan for Robinhood Chain; the contracts' sources are verified there
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-  blockTimeSeconds: 0.1,
+  // Robinhood Chain is an Arbitrum-stack rollup: `block.number` inside the EVM is the Ethereum L1 block number
+  // (~12 s), not the 0.1 s L2 block. The vault's rebalance interval and lastRebalanceBlock count those L1 blocks.
+  blockTimeSeconds: 12,
+} as const;
+
+/** Hard caps of IndexConfig.set, mirrored from src/IndexConfig.sol. */
+export const CONFIG_CAPS = {
+  thresholdBps: 1000,
+  incentiveBps: 100,
+  creatorShareBps: 5000,
+  rebalanceInterval: 1000000,
+  redeemFeeBps: 500,
 } as const;
 
 /**
