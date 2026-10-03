@@ -176,6 +176,23 @@ p { line-height: 1.6; }
 .create-card:hover { border-color: var(--accent); text-decoration: none; }
 @media (max-width: 640px) { .create-card { grid-template-columns: auto 1fr; } .create-card .btn { grid-column: 1 / -1; } }
 
-/* deposit/redeem amount slider */
-.slider { width: 100%; margin: 10px 0 0; accent-color: var(--accent); background: transparent; cursor: pointer; }
-.slider:disabled { opacity: .4; cursor: not-allowed; }
+/* amount slider: the filled part is driven by --fill, set inline from the current amount */
+.slider { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; margin: 10px 0 0; background: transparent; cursor: pointer; }
+.slider::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; background: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--border) var(--fill, 0%)); }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -5px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); box-shadow: 0 1px 4px rgba(0, 0, 0, .55); }
+.slider::-moz-range-track { height: 6px; border-radius: 999px; background: var(--border); }
+.slider::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--accent); }
+.slider::-moz-range-thumb { width: 16px; height: 16px; border: 2px solid var(--surface); border-radius: 50%; background: var(--accent); }
+.slider:disabled { cursor: not-allowed; }
+.slider:disabled::-webkit-slider-runnable-track { background: var(--border); }
+.slider:disabled::-webkit-slider-thumb { background: var(--border); }
+.slider:disabled::-moz-range-thumb { background: var(--border); }
+
+/* collapsible card: a <details> that keeps a rarely used panel out of the way */
+.card > summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.card > summary::-webkit-details-marker { display: none; }
+.card > summary::after { content: "⌄"; color: var(--muted); font-size: 1.1rem; line-height: 1; margin-top: -6px; }
+.card[open] > summary::after { content: "⌃"; margin-top: 4px; }
+.card > summary h3 { margin: 0; }
+.fields { display: grid; gap: 0 16px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-top: 16px; }
+.input input.mono { font-size: .8rem; }

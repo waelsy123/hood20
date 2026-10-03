@@ -329,8 +329,8 @@ export function Vault({ address }: { address: Address }) {
                   </label>
                   <div className="input">
                     <input inputMode="decimal" placeholder="1000" value={usdIn} onChange={(e) => setUsdIn(e.target.value)} />
-                    <button className="btn sm" style={{ marginRight: 8 }} disabled={maxUsd === 0n} onClick={() => setUsdIn(usdAmountInput(maxUsd))}>max</button>
                     <span className="suffix">USD</span>
+                    <button className="btn sm" style={{ marginLeft: 10, marginRight: -6 }} disabled={maxUsd === 0n} onClick={() => setUsdIn(usdAmountInput(maxUsd))}>max</button>
                   </div>
                   <input
                     className="slider"
@@ -339,6 +339,7 @@ export function Vault({ address }: { address: Address }) {
                     max={100}
                     value={sliderPct}
                     disabled={maxUsd === 0n}
+                    style={{ ["--fill" as string]: `${sliderPct}%` }}
                     onChange={(e) => setUsdIn(usdAmountInput((maxUsd * BigInt(e.target.value)) / 100n))}
                   />
                 </div>
