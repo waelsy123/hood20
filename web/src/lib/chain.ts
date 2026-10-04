@@ -21,6 +21,17 @@ export const publicClient = createPublicClient({
   batch: { multicall: { wait: 16 } },
 });
 const MAX_UINT256 = 2n ** 256n - 1n;
+
+/**
+ * USD value of `amount` through a valuer, or null when it refuses to price. ChainlinkAdapter reverts StalePrice
+ * once a feed is past its window, and Robinhood's equity feeds publish nothing outside market hours, so this is the
+ * normal state every weekend. The vault itself is unaffected: deposit and redeem are pro-rata and oracle-free.
+ */
+function priceOf(valuer: Address, amount: bigint): Promise<bigint | null> {
+  return publicClient
+    .readContract({ address: valuer, abi: ChainlinkAdapterAbi, functionName: "valueOf", args: [amount] })
+    .catch(() => null);
+}
 const multicall3Abi = parseAbi(["function getBlockNumber() view returns (uint256)"]);
 
 type Eip1193 = { request: (a: { method: string; params?: unknown[] }) => Promise<unknown>; on?: Function; removeListener?: Function };
@@ -99,22 +110,19 @@ export class ChainSource implements Source {
 
   async getVault(address: Address): Promise<VaultInfo> {
     const v = { address, abi: IndexVaultAbi } as const;
-    const [name, symbol, totalSupply, count, snap, deviationBps, lastRebalanceBlock, creator] = await Promise.all([
+    const [name, symbol, totalSupply, count, lastRebalanceBlock, creator] = await Promise.all([
       publicClient.readContract({ ...v, functionName: "name" }),
       publicClient.readContract({ ...v, functionName: "symbol" }),
       publicClient.readContract({ ...v, functionName: "totalSupply" }),
       publicClient.readContract({ ...v, functionName: "assetCount" }),
-      publicClient.readContract({ ...v, functionName: "snapshot" }),
-      publicClient.readContract({ ...v, functionName: "deviationBps" }),
       publicClient.readContract({ ...v, functionName: "lastRebalanceBlock" }),
       publicClient.readContract({ ...v, functionName: "creator" }),
     ]);
-    const [vals, nav] = snap;
     const raw = await Promise.all(
       Array.from({ length: Number(count) }, (_, i) => publicClient.readContract({ ...v, functionName: "assets", args: [BigInt(i)] })),
     );
     const assets = await Promise.all(
-      raw.map(async ([token, valuer, weightBps], i) => {
+      raw.map(async ([token, valuer, weightBps]) => {
         const t = { address: token, abi: erc20Abi } as const;
         const [sym, nm, dec, balance] = await Promise.all([
           publicClient.readContract({ ...t, functionName: "symbol" }),
@@ -122,11 +130,15 @@ export class ChainSource implements Source {
           publicClient.readContract({ ...t, functionName: "decimals" }),
           publicClient.readContract({ ...t, functionName: "balanceOf", args: [address] }),
         ]);
-        const unitValue = await publicClient.readContract({ address: valuer, abi: ChainlinkAdapterAbi, functionName: "valueOf", args: [10n ** BigInt(dec)] });
-        return { token, valuer, weightBps: Number(weightBps), symbol: sym, name: nm, decimals: dec, balance, value: vals[i], unitValue };
+        const price = (amount: bigint) => priceOf(valuer, amount);
+        const [value, unitValue] = await Promise.all([price(balance), price(10n ** BigInt(dec))]);
+        return { token, valuer, weightBps: Number(weightBps), symbol: sym, name: nm, decimals: dec, balance, value, unitValue };
       }),
     );
-    return { address, creator, name, symbol, totalSupply, nav, deviationBps: Number(deviationBps), lastRebalanceBlock, assets };
+    // One unavailable price makes NAV and the drift unknowable; everything else about the vault still reads.
+    const nav = assets.every((a) => a.value !== null) ? assets.reduce((s, a) => s + a.value!, 0n) : null;
+    const deviationBps = nav === null ? null : Number(await publicClient.readContract({ ...v, functionName: "deviationBps" }).catch(() => 0n));
+    return { address, creator, name, symbol, totalSupply, nav, deviationBps, lastRebalanceBlock, assets };
   }
 
   /** The config's curated registry is the catalog: every registered token with its current valuer and price. */
@@ -141,7 +153,7 @@ export class ChainSource implements Source {
           publicClient.readContract({ ...t, functionName: "name" }),
           publicClient.readContract({ ...t, functionName: "decimals" }),
         ]);
-        const unitValue = await publicClient.readContract({ address: valuer, abi: ChainlinkAdapterAbi, functionName: "valueOf", args: [10n ** BigInt(decimals)] });
+        const unitValue = await priceOf(valuer, 10n ** BigInt(decimals));
         return { key: symbol, symbol, name: name.replace(" • Robinhood Token", ""), token, valuer, decimals, unitValue };
       }),
     );

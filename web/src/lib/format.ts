@@ -1,11 +1,14 @@
 import { formatUnits } from "viem";
 
-export function usd(value: bigint, digits = 2): string {
+/** An unavailable price prints as a dash: the equity feeds stop publishing outside market hours. */
+export function usd(value: bigint | null, digits = 2): string {
+  if (value === null) return "—";
   const n = Number(formatUnits(value, 18));
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: digits, minimumFractionDigits: digits });
 }
 
-export function usdCompact(value: bigint): string {
+export function usdCompact(value: bigint | null): string {
+  if (value === null) return "—";
   const n = Number(formatUnits(value, 18));
   if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
   if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}k`;
@@ -17,8 +20,8 @@ export function amount(value: bigint, decimals: number, digits = 4): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: digits });
 }
 
-export function pct(bps: number, digits = 2): string {
-  return `${(bps / 100).toFixed(digits)}%`;
+export function pct(bps: number | null, digits = 2): string {
+  return bps === null ? "—" : `${(bps / 100).toFixed(digits)}%`;
 }
 
 export function short(addr: string): string {

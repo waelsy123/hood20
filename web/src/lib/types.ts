@@ -8,8 +8,10 @@ export type AssetInfo = {
   name: string;
   decimals: number;
   balance: bigint; // vault holding, raw units
-  value: bigint; // USD, 18 decimals
-  unitValue: bigint; // USD value of one whole token, 18 decimals
+  // USD, 18 decimals. Null when the feed is stale or closed: Robinhood's equity feeds publish nothing outside
+  // market hours, so every valuer reverts at weekends. Deposits and redemptions never read a price.
+  value: bigint | null;
+  unitValue: bigint | null; // USD value of one whole token, 18 decimals; null for the same reason
 };
 
 export type CuratedAsset = {
@@ -19,7 +21,7 @@ export type CuratedAsset = {
   token: Address;
   valuer: Address;
   decimals: number;
-  unitValue: bigint; // USD value of one whole token, 18 decimals
+  unitValue: bigint | null; // USD value of one whole token, 18 decimals; null when the feed is stale or closed
 };
 
 export type CreateInput = {
@@ -35,8 +37,8 @@ export type VaultInfo = {
   name: string;
   symbol: string;
   totalSupply: bigint;
-  nav: bigint; // USD, 18 decimals
-  deviationBps: number;
+  nav: bigint | null; // USD, 18 decimals; null when any constituent's price is unavailable
+  deviationBps: number | null; // null for the same reason
   lastRebalanceBlock: bigint;
   assets: AssetInfo[];
 };

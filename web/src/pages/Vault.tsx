@@ -83,18 +83,21 @@ export function Vault({ address }: { address: Address }) {
   const g = useMemo(() => (v ? gaps(v) : null), [v]);
   const state = v ? rebalanceState(v, config, block) : null;
 
-  // deposit preview
-  const usdWanted = parseDecimal(usdIn, 18);
-  const sharesWanted = v && usdWanted ? sharesForUsd(v, usdWanted) : 0n;
+  // Deposit sizing. The box takes USD while the feeds are live; outside market hours no price exists, so it takes
+  // share counts instead and the deposit keeps working, because deposit and redeem are pro-rata and oracle-free.
+  const priced = !!v && v.nav !== null;
+  const typed = parseDecimal(usdIn, 18);
+  const sharesWanted = (!v || !typed ? 0n : priced ? sharesForUsd(v, typed) : typed) ?? 0n;
   const depositNeeds = v && sharesWanted > 0n ? depositAmounts(v, sharesWanted) : null;
   const shortAssets = v && depositNeeds && pos ? depositNeeds.map((n, i) => n > pos.balances[i]) : [];
 
   // Default to the mode the wallet can actually use: deposit what it holds when it holds every constituent,
   // buy with USDG when something is missing.
   useEffect(() => {
+    if (!priced) return setPay("assets"); // buying prices the shortfall through the oracle
     if (payPicked || !v || !pos) return;
     setPay(v.assets.every((_, i) => pos.balances[i] > 0n) ? "assets" : "usdg");
-  }, [v, pos, payPicked]);
+  }, [v, pos, payPicked, priced]);
   const choosePay = (p: "usdg" | "assets") => {
     setPay(p);
     setPayPicked(true);
@@ -141,8 +144,8 @@ export function Vault({ address }: { address: Address }) {
       ? maxSharesFromAssets(v, pos.balances)
       : maxSharesWithUsdg(v, pos.balances, usdgBal ?? 0n, USDG, 150n); // 1.5% headroom for slippage and impact
   }, [v, pos, pay, usdgBal]);
-  const maxUsd = v ? usdForShares(v, maxShares) : 0n;
-  const sliderPct = maxUsd > 0n && usdWanted ? Math.min(100, Number((usdWanted * 100n) / maxUsd)) : 0;
+  const maxAmount = (!v ? 0n : priced ? usdForShares(v, maxShares) : maxShares) ?? 0n;
+  const sliderPct = maxAmount > 0n && typed ? Math.min(100, Number((typed * 100n) / maxAmount)) : 0;
   const quote = bq && bq.key === legsKey ? bq.quote : null;
   const usdgShort = !!(quote && usdgBal !== null && quote.usdgMax + usdgDirect > usdgBal);
   const canBuy = !!(v && legs && pos && sharesWanted > 0n && quote && !usdgShort && !busy);
@@ -221,8 +224,8 @@ export function Vault({ address }: { address: Address }) {
   if (!v) return <main className="container section"><p className="muted">Loading vault…</p></main>;
 
   const pps = navPerShare(v);
-  const myValue = pos ? (pos.shares * pps) / WAD : 0n;
-  const split = config ? incentiveSplit(v, config) : { budget: 0n, rebalancer: 0n, creator: 0n };
+  const myValue = pos && pps !== null ? (pos.shares * pps) / WAD : null;
+  const split = config ? incentiveSplit(v, config) : null;
 
   return (
     <main className="container" style={{ minHeight: "60vh" }}>
@@ -254,15 +257,15 @@ export function Vault({ address }: { address: Address }) {
                 <thead><tr><th>Asset</th><th className="num">Weight</th><th className="num">Balance</th><th className="num">Value</th><th className="num">Target</th><th className="num">Gap</th></tr></thead>
                 <tbody>
                   {v.assets.map((a, i) => {
-                    const gp = g!.perAsset[i];
+                    const gp = g?.perAsset[i] ?? null; // no gap to show while a price is missing
                     return (
                       <tr key={a.token}>
                         <td><span className="sym">{a.symbol}</span> <span className="muted small">{usd(a.unitValue)}</span></td>
                         <td className="num">{pct(a.weightBps, 1)}</td>
                         <td className="num">{amount(a.balance, a.decimals, 4)}</td>
                         <td className="num">{usd(a.value)}</td>
-                        <td className="num">{usd(gp.target)}</td>
-                        <td className="num" style={{ color: gp.gap === 0n ? "inherit" : gp.over ? "var(--warn)" : "var(--good)" }}>{gp.gap === 0n ? "—" : `${gp.over ? "+" : "−"}${usd(gp.gap)}`}</td>
+                        <td className="num">{usd(gp?.target ?? null)}</td>
+                        <td className="num" style={{ color: !gp || gp.gap === 0n ? "inherit" : gp.over ? "var(--warn)" : "var(--good)" }}>{!gp ? "—" : gp.gap === 0n ? "—" : `${gp.over ? "+" : "−"}${usd(gp.gap)}`}</td>
                       </tr>
                     );
                   })}
@@ -276,10 +279,10 @@ export function Vault({ address }: { address: Address }) {
             <div style={{ margin: "12px 0 6px" }} className="row between small">
               <span className="muted">Deviation {pct(v.deviationBps)} of NAV · threshold {config ? pct(config.thresholdBps) : "—"}</span>
             </div>
-            <div className={`bar ${state?.kind === "balanced" ? "good" : ""}`}><div style={{ width: `${Math.min(100, config ? (v.deviationBps / Math.max(1, config.thresholdBps)) * 100 : 0)}%` }} /></div>
+            <div className={`bar ${state?.kind === "balanced" ? "good" : ""}`}><div style={{ width: `${Math.min(100, config && v.deviationBps !== null ? (v.deviationBps / Math.max(1, config.thresholdBps)) * 100 : 0)}%` }} /></div>
             <dl className="kv" style={{ marginTop: 14 }}>
-              <dt>Rebalancer keeps up to</dt><dd>{usd(split.rebalancer)} <span className="muted">(holders pay {config ? pct(config.incentiveBps) : "—"} of {usd(g!.misplaced)} misplaced)</span></dd>
-              <dt>Creator earns</dt><dd>{usd(split.creator)} <span className="muted">({config ? pct(config.creatorShareBps, 0) : "—"} of the rebalancer's take, as {v.symbol})</span></dd>
+              <dt>Rebalancer keeps up to</dt><dd>{usd(split?.rebalancer ?? null)} <span className="muted">(holders pay {config ? pct(config.incentiveBps) : "—"} of {usd(g?.misplaced ?? null)} misplaced)</span></dd>
+              <dt>Creator earns</dt><dd>{usd(split?.creator ?? null)} <span className="muted">({config ? pct(config.creatorShareBps, 0) : "—"} of the rebalancer's take, as {v.symbol})</span></dd>
               <dt>Interval</dt>
               <dd>
                 {state?.kind === "cooldown"
@@ -289,7 +292,9 @@ export function Vault({ address }: { address: Address }) {
               <dt>Last rebalance</dt><dd>{v.lastRebalanceBlock === 0n ? "never" : `block ${v.lastRebalanceBlock.toLocaleString()}`}</dd>
               <dt>Moves</dt>
               <dd>
-                {g!.perAsset.map((gp, i) => (gp.gap === 0n ? null : <span key={i} style={{ marginRight: 10 }}>{gp.over ? "pull" : "push"} {v.assets[i].symbol} {usd(gp.gap)}</span>))}
+                {g === null
+                  ? "waiting for prices"
+                  : g.perAsset.map((gp, i) => (gp.gap === 0n ? null : <span key={i} style={{ marginRight: 10 }}>{gp.over ? "pull" : "push"} {v.assets[i].symbol} {usd(gp.gap)}</span>))}
               </dd>
             </dl>
             <p className="muted small" style={{ marginBottom: 0 }}>Rebalancing is a contract call, see the <Link to="/docs">rebalancer guide</Link>. Any contract may do it once the vault is open.</p>
@@ -324,13 +329,19 @@ export function Vault({ address }: { address: Address }) {
               <>
                 <div className="field">
                   <label>
-                    Amount to deposit
-                    {wallet.address && <span className="muted"> · max {usd(maxUsd)}{pay === "usdg" ? " with your USDG" : " from what you hold"}</span>}
+                    {priced ? "Amount to deposit" : `${v.symbol} to mint`}
+                    {wallet.address && (
+                      <span className="muted">
+                        {" · max "}
+                        {priced ? usd(maxAmount) : amount(maxAmount, 18, 4)}
+                        {priced ? (pay === "usdg" ? " with your USDG" : " from what you hold") : " from what you hold"}
+                      </span>
+                    )}
                   </label>
                   <div className="input">
-                    <input inputMode="decimal" placeholder="1000" value={usdIn} onChange={(e) => setUsdIn(e.target.value)} />
-                    <span className="suffix">USD</span>
-                    <button className="btn sm" style={{ marginLeft: 10, marginRight: -6 }} disabled={maxUsd === 0n} onClick={() => setUsdIn(usdAmountInput(maxUsd))}>max</button>
+                    <input inputMode="decimal" placeholder={priced ? "1000" : "1.0"} value={usdIn} onChange={(e) => setUsdIn(e.target.value)} />
+                    <span className="suffix">{priced ? "USD" : v.symbol}</span>
+                    <button className="btn sm" style={{ marginLeft: 10, marginRight: -6 }} disabled={maxAmount === 0n} onClick={() => setUsdIn(usdAmountInput(maxAmount))}>max</button>
                   </div>
                   <input
                     className="slider"
@@ -338,13 +349,20 @@ export function Vault({ address }: { address: Address }) {
                     min={0}
                     max={100}
                     value={sliderPct}
-                    disabled={maxUsd === 0n}
+                    disabled={maxAmount === 0n}
                     style={{ ["--fill" as string]: `${sliderPct}%` }}
-                    onChange={(e) => setUsdIn(usdAmountInput((maxUsd * BigInt(e.target.value)) / 100n))}
+                    onChange={(e) => setUsdIn(usdAmountInput((maxAmount * BigInt(e.target.value)) / 100n))}
                   />
                 </div>
+                {!priced && (
+                  <p className="small" style={{ color: "var(--warn)", marginTop: 0 }}>
+                    No live price: Robinhood's equity feeds publish only while the market is open. Depositing and redeeming
+                    are pro-rata and never read a price, so both still work, sized in shares. Buying with USDG and
+                    rebalancing wait for the next session.
+                  </p>
+                )}
                 <div className="row small" style={{ gap: 14, marginBottom: 10 }}>
-                  <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "usdg"} onChange={() => choosePay("usdg")} /> Pay with USDG</label>
+                  <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "usdg"} disabled={!priced} onChange={() => choosePay("usdg")} /> Pay with USDG</label>
                   <label className="row" style={{ gap: 6 }}><input type="radio" checked={pay === "assets"} onChange={() => choosePay("assets")} /> Deposit the assets I hold</label>
                 </div>
                 {depositNeeds && pos && (

@@ -9,6 +9,9 @@ export function rebalanceState(v: VaultInfo, cfg: ConfigInfo | null, block: bigi
     const opensAt = v.lastRebalanceBlock + BigInt(cfg.rebalanceInterval);
     if (block < opensAt) return { kind: "cooldown", label: "interval running", blocksLeft: Number(opensAt - block) };
   }
+  // Outside market hours the equity feeds stop publishing, so the vault cannot price itself and refuses to
+  // rebalance. Deposits and redemptions are unaffected.
+  if (v.deviationBps === null) return { kind: "unknown", label: "prices closed", blocksLeft: 0 };
   if (v.deviationBps < cfg.thresholdBps) return { kind: "balanced", label: "balanced", blocksLeft: 0 };
   return { kind: "open", label: "rebalance open", blocksLeft: 0 };
 }

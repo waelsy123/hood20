@@ -36,15 +36,16 @@ function holding(key: string, weightBps: number, navUsd: number, drift = 1): Ass
     name: a.name,
     decimals: a.decimals,
     balance,
-    value: (balance * a.unitValue) / 10n ** BigInt(a.decimals),
+    value: (balance * a.unitValue!) / 10n ** BigInt(a.decimals),
     unitValue: a.unitValue,
   };
 }
 
 function withNav(v: Omit<VaultInfo, "nav" | "deviationBps">): VaultInfo {
-  const nav = v.assets.reduce((s, a) => s + a.value, 0n);
+  // demo mode always has prices, so the non-null assertions below hold
+  const nav = v.assets.reduce((s, a) => s + a.value!, 0n);
   const full = { ...v, nav, deviationBps: 0 };
-  full.deviationBps = gaps(full).maxBps;
+  full.deviationBps = gaps(full)!.maxBps;
   return full;
 }
 
@@ -138,11 +139,11 @@ export class MockSource implements Source {
       const allowance = this.w.allowances.get(`${v.address}:${a.token}`) ?? 0n;
       if (allowance < 2n ** 255n) this.w.allowances.set(`${v.address}:${a.token}`, allowance - amt);
       a.balance += amt;
-      a.value = (a.balance * a.unitValue) / 10n ** BigInt(a.decimals);
+      a.value = (a.balance * a.unitValue!) / 10n ** BigInt(a.decimals);
     });
     v.totalSupply += shares;
-    v.nav = v.assets.reduce((s, a) => s + a.value, 0n);
-    v.deviationBps = gaps(v).maxBps;
+    v.nav = v.assets.reduce((s, a) => s + a.value!, 0n);
+    v.deviationBps = gaps(v)!.maxBps;
     this.w.shares.set(v.address, (this.w.shares.get(v.address) ?? 0n) + shares);
     return { hash: hash() };
   }
@@ -155,12 +156,12 @@ export class MockSource implements Source {
     amounts.forEach((amt, i) => {
       const a = v.assets[i];
       a.balance -= amt;
-      a.value = (a.balance * a.unitValue) / 10n ** BigInt(a.decimals);
+      a.value = (a.balance * a.unitValue!) / 10n ** BigInt(a.decimals);
       this.w.wallet.set(a.token, (this.w.wallet.get(a.token) ?? 0n) + amt);
     });
     v.totalSupply -= shares - fee;
-    v.nav = v.assets.reduce((s, a) => s + a.value, 0n);
-    v.deviationBps = gaps(v).maxBps;
+    v.nav = v.assets.reduce((s, a) => s + a.value!, 0n);
+    v.deviationBps = gaps(v)!.maxBps;
     this.w.shares.set(v.address, have - shares);
     return { hash: hash() };
   }
@@ -189,7 +190,7 @@ export class MockSource implements Source {
       if (amt === 0n) return;
       const a = vault.assets[i];
       if (isUsdg(a.token)) return; // paid from the wallet's USDG, no swap
-      const usdValue = (amt * a.unitValue) / 10n ** BigInt(a.decimals); // 18 decimals
+      const usdValue = (amt * a.unitValue!) / 10n ** BigInt(a.decimals); // 18 decimals
       const usdgIn = mulDivCeil(usdValue * 10_030n, 1n, 10_000n * 10n ** BigInt(18 - USDG.decimals));
       const usdgMax = mulDivCeil(usdgIn * 10_050n, 1n, 10_000n);
       out.legs.push({ index: i, amountOut: amt, usdgIn, usdgMax, routing: "CLASSIC" });
@@ -218,11 +219,11 @@ export class MockSource implements Source {
       const bal = this.w.wallet.get(asset.token) ?? 0n;
       if (bal < amt) throw new Error(`Insufficient ${asset.symbol} balance`);
       this.w.wallet.set(asset.token, bal - amt);
-      return { ...asset, weightBps, balance: amt, value: (amt * asset.unitValue) / 10n ** BigInt(asset.decimals) };
+      return { ...asset, weightBps, balance: amt, value: (amt * asset.unitValue!) / 10n ** BigInt(asset.decimals) };
     });
     const address = addr(0x20, this.w.nextVault++);
     const v = withNav({ address, creator: user, name: input.name, symbol: input.symbol, totalSupply: 0n, lastRebalanceBlock: 0n, assets });
-    v.totalSupply = v.nav; // first deposit: 1 INDEX per USD
+    v.totalSupply = v.nav!; // first deposit: 1 INDEX per USD
     this.w.vaults.push(v);
     this.w.shares.set(address, v.totalSupply);
     return { hash: hash(), vault: address };

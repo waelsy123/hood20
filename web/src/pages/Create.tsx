@@ -41,7 +41,9 @@ export function Create() {
     const idx = catalog.indexOf(p.asset);
     return balances.length ? seedAmounts[i] > (balances[idx] ?? 0n) : false;
   });
-  const formOk = name.trim().length > 1 && symbol.trim().length > 1 && picks.length >= 2 && total === 10_000 && seed > 0n && !busy;
+  // The factory prices the first deposit through the valuers, so a pick whose feed is closed blocks creation.
+  const unpriced = picks.filter((p) => p.asset.unitValue === null).map((p) => p.asset.symbol);
+  const formOk = name.trim().length > 1 && symbol.trim().length > 1 && picks.length >= 2 && total === 10_000 && seed > 0n && unpriced.length === 0 && !busy;
   const ready = formOk && !shortfall.some(Boolean);
 
   // Seed constituents the wallet is short of are bought with USDG through Uniswap first, like a deposit.
@@ -183,6 +185,12 @@ export function Create() {
                   </div>
                 )}
               </div>
+            )}
+            {unpriced.length > 0 && (
+              <p className="small" style={{ color: "var(--bad)" }}>
+                No live price for {unpriced.join(", ")}. Robinhood's equity feeds publish only while the market is open, and
+                the first deposit is priced through them, so creation has to wait for the next session.
+              </p>
             )}
             <p className="muted small">
               The factory deploys the vault and makes this first deposit in the same transaction. One INDEX per dollar seeded.
