@@ -15,7 +15,8 @@ export function StatePill({ v }: { v: VaultInfo }) {
   return (
     <span className={`pill ${cls}`}>
       <span className="dot" />
-      {s.label} · {pct(v.deviationBps)} off
+      {s.label}
+      {v.deviationBps !== null && ` · ${pct(v.deviationBps)} off`}
     </span>
   );
 }
