@@ -19,6 +19,7 @@ const CATALOG: (CuratedAsset & { price: number })[] = CURATED_ASSETS.map((a, i) 
   token: a.token,
   valuer: addr(0xb0, i + 1),
   unitValue: parseUnits(a.price.toFixed(8), 18),
+  stale: false, // demo prices are always live
 }));
 
 const byKey = (k: string) => CATALOG.find((a) => a.key === k)!;
@@ -38,13 +39,15 @@ function holding(key: string, weightBps: number, navUsd: number, drift = 1): Ass
     balance,
     value: (balance * a.unitValue!) / 10n ** BigInt(a.decimals),
     unitValue: a.unitValue,
+    priceUpdatedAt: Math.floor(Date.now() / 1000),
+    stale: false,
   };
 }
 
-function withNav(v: Omit<VaultInfo, "nav" | "deviationBps">): VaultInfo {
+function withNav(v: Omit<VaultInfo, "nav" | "deviationBps" | "stale">): VaultInfo {
   // demo mode always has prices, so the non-null assertions below hold
   const nav = v.assets.reduce((s, a) => s + a.value!, 0n);
-  const full = { ...v, nav, deviationBps: 0 };
+  const full = { ...v, nav, deviationBps: 0, stale: false };
   full.deviationBps = gaps(full)!.maxBps;
   return full;
 }
@@ -219,7 +222,7 @@ export class MockSource implements Source {
       const bal = this.w.wallet.get(asset.token) ?? 0n;
       if (bal < amt) throw new Error(`Insufficient ${asset.symbol} balance`);
       this.w.wallet.set(asset.token, bal - amt);
-      return { ...asset, weightBps, balance: amt, value: (amt * asset.unitValue!) / 10n ** BigInt(asset.decimals) };
+      return { ...asset, weightBps, balance: amt, value: (amt * asset.unitValue!) / 10n ** BigInt(asset.decimals), priceUpdatedAt: Math.floor(Date.now() / 1000), stale: false };
     });
     const address = addr(0x20, this.w.nextVault++);
     const v = withNav({ address, creator: user, name: input.name, symbol: input.symbol, totalSupply: 0n, lastRebalanceBlock: 0n, assets });

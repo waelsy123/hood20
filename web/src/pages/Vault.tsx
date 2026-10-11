@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits, parseUnits, type Address } from "viem";
 import { CHAIN, MOCK, USDG, isUsdg } from "../config";
 import { useApp } from "../lib/context";
-import { amount, blocksToTime, pct, short, usd } from "../lib/format";
+import { ago, amount, blocksToTime, pct, short, usd } from "../lib/format";
 import {
   depositAmounts,
   gaps,
@@ -85,7 +85,8 @@ export function Vault({ address }: { address: Address }) {
 
   // Deposit sizing. The box takes USD while the feeds are live; outside market hours no price exists, so it takes
   // share counts instead and the deposit keeps working, because deposit and redeem are pro-rata and oracle-free.
-  const priced = !!v && v.nav !== null;
+  const priced = !!v && v.nav !== null; // a price exists, though it may be the last close
+  const stale = !!v && v.stale; // past the adapter's window: shown, but the vault will not act on it
   const typed = parseDecimal(usdIn, 18);
   const sharesWanted = (!v || !typed ? 0n : priced ? sharesForUsd(v, typed) : typed) ?? 0n;
   const depositNeeds = v && sharesWanted > 0n ? depositAmounts(v, sharesWanted) : null;
@@ -94,7 +95,7 @@ export function Vault({ address }: { address: Address }) {
   // Default to the mode the wallet can actually use: deposit what it holds when it holds every constituent,
   // buy with USDG when something is missing.
   useEffect(() => {
-    if (!priced) return setPay("assets"); // buying prices the shortfall through the oracle
+    if (!priced) return setPay("assets"); // nothing to size the shortfall against
     if (payPicked || !v || !pos) return;
     setPay(v.assets.every((_, i) => pos.balances[i] > 0n) ? "assets" : "usdg");
   }, [v, pos, payPicked, priced]);
@@ -248,6 +249,13 @@ export function Vault({ address }: { address: Address }) {
         <div className="card stat"><span className="label">Max deviation</span><span className="value sm">{pct(v.deviationBps)}</span></div>
       </div>
 
+      {stale && (
+        <p className="muted small" style={{ margin: "10px 0 0" }}>
+          Prices are the last close: Robinhood's equity feeds publish only during market hours, so the vault refuses to
+          rebalance until they resume. Deposits and redemptions are pro-rata and unaffected.
+        </p>
+      )}
+
       <div className="grid cols-2" style={{ marginTop: 16, alignItems: "start" }}>
         <div className="grid" style={{ gap: 16 }}>
           <div className="card">
@@ -260,7 +268,10 @@ export function Vault({ address }: { address: Address }) {
                     const gp = g?.perAsset[i] ?? null; // no gap to show while a price is missing
                     return (
                       <tr key={a.token}>
-                        <td><span className="sym">{a.symbol}</span> <span className="muted small">{usd(a.unitValue)}</span></td>
+                        <td>
+                          <span className="sym">{a.symbol}</span> <span className="muted small">{usd(a.unitValue)}</span>
+                          {a.stale && <span className="muted small" style={{ color: "var(--warn)" }}> · {ago(a.priceUpdatedAt)}</span>}
+                        </td>
                         <td className="num">{pct(a.weightBps, 1)}</td>
                         <td className="num">{amount(a.balance, a.decimals, 4)}</td>
                         <td className="num">{usd(a.value)}</td>
@@ -354,11 +365,11 @@ export function Vault({ address }: { address: Address }) {
                     onChange={(e) => setUsdIn(usdAmountInput((maxAmount * BigInt(e.target.value)) / 100n))}
                   />
                 </div>
-                {!priced && (
+                {stale && (
                   <p className="small" style={{ color: "var(--warn)", marginTop: 0 }}>
-                    No live price: Robinhood's equity feeds publish only while the market is open. Depositing and redeeming
-                    are pro-rata and never read a price, so both still work, sized in shares. Buying with USDG and
-                    rebalancing wait for the next session.
+                    Prices are each feed's last close, because Robinhood's equity feeds publish only while the market is
+                    open. Depositing and redeeming are pro-rata and never read a price, so both work normally; the dollar
+                    figure is indicative. Rebalancing waits for the next session.
                   </p>
                 )}
                 <div className="row small" style={{ gap: 14, marginBottom: 10 }}>

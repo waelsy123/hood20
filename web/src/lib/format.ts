@@ -28,6 +28,18 @@ export function short(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+/** How long ago a feed last published, e.g. "2d 4h ago". */
+export function ago(unixSeconds: number | null): string {
+  if (unixSeconds === null) return "unknown";
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
+  if (s < 90) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(s / 3600);
+  if (h < 48) return `${h}h ${Math.round((s % 3600) / 60)}m ago`;
+  return `${Math.floor(h / 24)}d ${h % 24}h ago`;
+}
+
 export function blocksToTime(blocks: number, blockTime: number): string {
   const s = Math.max(0, Math.round(blocks * blockTime));
   if (s < 60) return `${s}s`;

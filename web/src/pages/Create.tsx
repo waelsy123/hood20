@@ -42,7 +42,7 @@ export function Create() {
     return balances.length ? seedAmounts[i] > (balances[idx] ?? 0n) : false;
   });
   // The factory prices the first deposit through the valuers, so a pick whose feed is closed blocks creation.
-  const unpriced = picks.filter((p) => p.asset.unitValue === null).map((p) => p.asset.symbol);
+  const unpriced = picks.filter((p) => p.asset.stale).map((p) => p.asset.symbol);
   const formOk = name.trim().length > 1 && symbol.trim().length > 1 && picks.length >= 2 && total === 10_000 && seed > 0n && unpriced.length === 0 && !busy;
   const ready = formOk && !shortfall.some(Boolean);
 
@@ -58,7 +58,8 @@ export function Create() {
   const usdgHeld = usdgIdx >= 0 ? (balances[usdgIdx] ?? 0n) : 0n;
   const pseudoVault: VaultInfo | null = useMemo(() => (picks.length ? {
     address: ZERO, creator: ZERO, name: name || "new index", symbol: symbol || "INDEX", totalSupply: 0n, nav: 0n, deviationBps: 0, lastRebalanceBlock: 0n,
-    assets: picks.map((p) => ({ token: p.asset.token, valuer: p.asset.valuer, weightBps: p.weightBps, symbol: p.asset.symbol, name: p.asset.name, decimals: p.asset.decimals, balance: 0n, value: 0n, unitValue: p.asset.unitValue })),
+    stale: picks.some((p) => p.asset.stale),
+    assets: picks.map((p) => ({ token: p.asset.token, valuer: p.asset.valuer, weightBps: p.weightBps, symbol: p.asset.symbol, name: p.asset.name, decimals: p.asset.decimals, balance: 0n, value: 0n, unitValue: p.asset.unitValue, priceUpdatedAt: null, stale: p.asset.stale })),
   } : null), [picks, name, symbol]);
   const legsKey = legs.join(",");
   const needsBuy = legs.some((l) => l > 0n);
@@ -188,8 +189,9 @@ export function Create() {
             )}
             {unpriced.length > 0 && (
               <p className="small" style={{ color: "var(--bad)" }}>
-                No live price for {unpriced.join(", ")}. Robinhood's equity feeds publish only while the market is open, and
-                the first deposit is priced through them, so creation has to wait for the next session.
+                {unpriced.join(", ")} {unpriced.length === 1 ? "has" : "have"} no live price. Robinhood's equity feeds publish
+                only while the market is open, and the factory prices the first deposit through them, so creating this index
+                has to wait for the next session. The prices shown are each feed's last close.
               </p>
             )}
             <p className="muted small">

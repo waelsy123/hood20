@@ -8,10 +8,13 @@ export type AssetInfo = {
   name: string;
   decimals: number;
   balance: bigint; // vault holding, raw units
-  // USD, 18 decimals. Null when the feed is stale or closed: Robinhood's equity feeds publish nothing outside
-  // market hours, so every valuer reverts at weekends. Deposits and redemptions never read a price.
+  // USD, 18 decimals, at the feed's last published answer. Robinhood's equity feeds publish only during market
+  // hours, so outside them this is the last close and `stale` is true: the vault refuses to act on it, but it is
+  // still the right number to show. Null only when the feed itself cannot be read.
   value: bigint | null;
-  unitValue: bigint | null; // USD value of one whole token, 18 decimals; null for the same reason
+  unitValue: bigint | null; // USD value of one whole token, 18 decimals
+  priceUpdatedAt: number | null; // unix seconds of the feed's last answer
+  stale: boolean; // past the adapter's window, so the vault will not price itself on it
 };
 
 export type CuratedAsset = {
@@ -21,7 +24,8 @@ export type CuratedAsset = {
   token: Address;
   valuer: Address;
   decimals: number;
-  unitValue: bigint | null; // USD value of one whole token, 18 decimals; null when the feed is stale or closed
+  unitValue: bigint | null; // USD value of one whole token, 18 decimals, at the feed's last answer
+  stale: boolean; // past the adapter's window: the asset can be held and redeemed, but not priced by a vault
 };
 
 export type CreateInput = {
@@ -37,8 +41,9 @@ export type VaultInfo = {
   name: string;
   symbol: string;
   totalSupply: bigint;
-  nav: bigint | null; // USD, 18 decimals; null when any constituent's price is unavailable
-  deviationBps: number | null; // null for the same reason
+  nav: bigint | null; // USD, 18 decimals, at the last published prices; null only if a feed cannot be read
+  deviationBps: number | null; // computed from those prices, as IndexVault._gaps does
+  stale: boolean; // at least one constituent's price is past its window, so the vault cannot rebalance
   lastRebalanceBlock: bigint;
   assets: AssetInfo[];
 };

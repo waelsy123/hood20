@@ -1,7 +1,8 @@
 import { createPublicClient, createWalletClient, custom, defineChain, fallback, http, parseAbi, type Address, type WalletClient } from "viem";
 import { ADDRESSES, CHAIN, UNISWAP, USDG, isUsdg } from "../config";
 import { ChainlinkAdapterAbi, IndexConfigAbi, IndexVaultAbi, IndexVaultFactoryAbi, erc20Abi } from "../abi";
-import type { BuyQuote, ConfigInfo, ConfigInput, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
+import type { AssetInfo, BuyQuote, ConfigInfo, ConfigInput, CreateInput, CuratedAsset, Position, Source, TxResult, VaultInfo } from "./types";
+import { gaps } from "./math";
 import { MAX_UINT160, maxInput, mergeSwaps, permit2Abi, quoteExactOutput, swapTransaction, type ApiQuote } from "./uniswap";
 
 export const robinhoodChain = defineChain({
@@ -22,16 +23,38 @@ export const publicClient = createPublicClient({
 });
 const MAX_UINT256 = 2n ** 256n - 1n;
 
+const aggregatorAbi = parseAbi([
+  "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
+]);
+
+type Price = { answer: bigint; scale: bigint; updatedAt: number; stale: boolean };
+
 /**
- * USD value of `amount` through a valuer, or null when it refuses to price. ChainlinkAdapter reverts StalePrice
- * once a feed is past its window, and Robinhood's equity feeds publish nothing outside market hours, so this is the
- * normal state every weekend. The vault itself is unaffected: deposit and redeem are pro-rata and oracle-free.
+ * The last price a valuer's feed published, read from the feed itself rather than through the valuer.
+ * ChainlinkAdapter reverts StalePrice once an answer is past its window, deliberately, so a vault can never settle
+ * on a stale price. A closed market is not missing data though: the feed still holds Friday's close, and that is
+ * what the interface should show, marked with its age.
  */
-function priceOf(valuer: Address, amount: bigint): Promise<bigint | null> {
-  return publicClient
-    .readContract({ address: valuer, abi: ChainlinkAdapterAbi, functionName: "valueOf", args: [amount] })
-    .catch(() => null);
+async function priceOf(valuer: Address): Promise<Price | null> {
+  try {
+    const a = { address: valuer, abi: ChainlinkAdapterAbi } as const;
+    const [feed, scale, maxStale] = await Promise.all([
+      publicClient.readContract({ ...a, functionName: "feed" }),
+      publicClient.readContract({ ...a, functionName: "scale" }),
+      publicClient.readContract({ ...a, functionName: "maxStale" }),
+    ]);
+    const round = await publicClient.readContract({ address: feed, abi: aggregatorAbi, functionName: "latestRoundData" });
+    const answer = round[1];
+    if (answer <= 0n) return null;
+    const updatedAt = Number(round[3]);
+    return { answer, scale, updatedAt, stale: BigInt(updatedAt) + maxStale < BigInt(Math.floor(Date.now() / 1000)) };
+  } catch {
+    return null;
+  }
 }
+
+/** ChainlinkAdapter.valueOf's own arithmetic, so a fresh price here equals what the vault would compute. */
+const valueAt = (p: Price | null, amount: bigint) => (p === null ? null : (amount * p.answer * 10n ** 18n) / p.scale);
 const multicall3Abi = parseAbi(["function getBlockNumber() view returns (uint256)"]);
 
 type Eip1193 = { request: (a: { method: string; params?: unknown[] }) => Promise<unknown>; on?: Function; removeListener?: Function };
@@ -130,15 +153,23 @@ export class ChainSource implements Source {
           publicClient.readContract({ ...t, functionName: "decimals" }),
           publicClient.readContract({ ...t, functionName: "balanceOf", args: [address] }),
         ]);
-        const price = (amount: bigint) => priceOf(valuer, amount);
-        const [value, unitValue] = await Promise.all([price(balance), price(10n ** BigInt(dec))]);
-        return { token, valuer, weightBps: Number(weightBps), symbol: sym, name: nm, decimals: dec, balance, value, unitValue };
+        const p = await priceOf(valuer);
+        return {
+          token, valuer, weightBps: Number(weightBps), symbol: sym, name: nm, decimals: dec, balance,
+          value: valueAt(p, balance), unitValue: valueAt(p, 10n ** BigInt(dec)),
+          priceUpdatedAt: p?.updatedAt ?? null, stale: p === null || p.stale,
+        } satisfies AssetInfo;
       }),
     );
-    // One unavailable price makes NAV and the drift unknowable; everything else about the vault still reads.
     const nav = assets.every((a) => a.value !== null) ? assets.reduce((s, a) => s + a.value!, 0n) : null;
-    const deviationBps = nav === null ? null : Number(await publicClient.readContract({ ...v, functionName: "deviationBps" }).catch(() => 0n));
-    return { address, creator, name, symbol, totalSupply, nav, deviationBps, lastRebalanceBlock, assets };
+    const vault: VaultInfo = {
+      address, creator, name, symbol, totalSupply, nav, deviationBps: null, lastRebalanceBlock, assets,
+      stale: assets.some((a) => a.stale),
+    };
+    // The contract's deviationBps() reverts whenever a feed is past its window, so compute it here with the same
+    // arithmetic: at the last published prices it is still the honest drift, it just cannot be acted on yet.
+    vault.deviationBps = gaps(vault)?.maxBps ?? null;
+    return vault;
   }
 
   /** The config's curated registry is the catalog: every registered token with its current valuer and price. */
@@ -153,8 +184,11 @@ export class ChainSource implements Source {
           publicClient.readContract({ ...t, functionName: "name" }),
           publicClient.readContract({ ...t, functionName: "decimals" }),
         ]);
-        const unitValue = await priceOf(valuer, 10n ** BigInt(decimals));
-        return { key: symbol, symbol, name: name.replace(" • Robinhood Token", ""), token, valuer, decimals, unitValue };
+        const p = await priceOf(valuer);
+        return {
+          key: symbol, symbol, name: name.replace(" • Robinhood Token", ""), token, valuer, decimals,
+          unitValue: valueAt(p, 10n ** BigInt(decimals)), stale: p === null || p.stale,
+        };
       }),
     );
   }
