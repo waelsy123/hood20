@@ -246,7 +246,9 @@ export class ChainSource implements Source {
       legs.map((amt, i) => {
         const a = vault.assets[i];
         if (amt === 0n || isUsdg(a.token)) return Promise.resolve(null);
-        return quoteExactOutput(user, a.token, amt).catch((e) => {
+        // Seed the input-sized fallback from the oracle price, for pairs with no exact-output route.
+        const estimateIn = a.unitValue === null ? undefined : (amt * a.unitValue) / 10n ** BigInt(a.decimals + 18 - USDG.decimals);
+        return quoteExactOutput(user, a.token, amt, estimateIn).catch((e) => {
           throw new Error(`${a.symbol}: ${(e as Error).message}`);
         });
       }),
@@ -256,7 +258,8 @@ export class ChainSource implements Source {
       if (!q) return;
       const usdgIn = BigInt(q.quote.input.amount);
       const usdgMax = maxInput(q);
-      out.legs.push({ index: i, amountOut: legs[i], usdgIn, usdgMax, routing: q.routing });
+      // an input-sized leg buys at least what was asked for, often a little more; show what will actually arrive
+      out.legs.push({ index: i, amountOut: BigInt(q.quote.output.amount), usdgIn, usdgMax, routing: q.routing });
       out.usdgIn += usdgIn;
       out.usdgMax += usdgMax;
     });

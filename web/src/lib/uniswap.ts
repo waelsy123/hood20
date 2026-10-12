@@ -56,23 +56,69 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-/** Exact-output quote: how much USDG buys exactly `amountOut` of `tokenOut` for `swapper`, on classic AMM routes. */
-export async function quoteExactOutput(swapper: Address, tokenOut: Address, amountOut: bigint): Promise<ApiQuote> {
-  const q = await post<ApiQuote>("quote", {
+function quote(swapper: Address, tokenOut: Address, type: "EXACT_INPUT" | "EXACT_OUTPUT", amount: bigint) {
+  return post<ApiQuote>("quote", {
     tokenIn: USDG.address,
     tokenOut,
     tokenInChainId: CHAIN.id,
     tokenOutChainId: CHAIN.id,
-    amount: amountOut.toString(),
-    type: "EXACT_OUTPUT",
+    amount: amount.toString(),
+    type,
     swapper,
     slippageTolerance: UNISWAP.slippagePct,
     routingPreference: "BEST_PRICE",
     protocols: ["V2", "V3", "V4"], // on-chain AMM swaps only (transaction calldata); UniswapX orders cannot be batched
   });
+}
+
+function checked(q: ApiQuote, tokenOut: Address): ApiQuote {
   if (q.routing !== "CLASSIC") throw new Error(`Uniswap routed ${tokenOut} as ${q.routing}, expected a classic swap`);
   if (q.quote.output.token.toLowerCase() !== tokenOut.toLowerCase()) throw new Error("Uniswap quote is for a different token");
   return q;
+}
+
+const noRoute = (e: unknown) => /NoRouteFound/i.test(String((e as Error).message));
+
+/**
+ * How much USDG buys at least `amountOut` of `tokenOut`.
+ *
+ * Exact output is what the deposit wants, because it buys precisely what the vault will pull and leaves no dust.
+ * The Trading API intermittently answers NoRouteFoundError for a pair it routes perfectly well a second later, so
+ * one retry comes first. If it still refuses, the leg is sized by input instead, raising the input until the
+ * quote's guaranteed minimum output covers what is needed; `estimateIn` seeds that search from the oracle price.
+ * Exact input routes on pairs exact output will not, USDG into WETH among them. Any surplus from that path simply
+ * stays in the wallet, because the deposit only ever pulls its pro-rata amount.
+ */
+export async function quoteExactOutput(
+  swapper: Address,
+  tokenOut: Address,
+  amountOut: bigint,
+  estimateIn?: bigint,
+): Promise<ApiQuote> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return checked(await quote(swapper, tokenOut, "EXACT_OUTPUT", amountOut), tokenOut);
+    } catch (e) {
+      if (!noRoute(e)) throw e;
+      if (attempt === 1 && estimateIn === undefined) {
+        throw new Error("Uniswap found no route for this pair just now. It is usually transient; try again.");
+      }
+    }
+  }
+  return sizeByInput(swapper, tokenOut, amountOut, estimateIn!);
+}
+
+async function sizeByInput(swapper: Address, tokenOut: Address, amountOut: bigint, estimateIn: bigint): Promise<ApiQuote> {
+  let amountIn = (estimateIn * 1_010n) / 1_000n + 1n; // start a percent above the oracle estimate
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const q = checked(await quote(swapper, tokenOut, "EXACT_INPUT", amountIn), tokenOut);
+    // minimumAmount is what the swap guarantees after slippage, so it is the honest thing to compare against
+    const floor = BigInt(q.quote.output.minimumAmount ?? q.quote.output.amount);
+    if (floor >= amountOut) return q;
+    if (floor === 0n) break;
+    amountIn = (amountIn * amountOut * 1_010n) / (floor * 1_000n) + 1n;
+  }
+  throw new Error("Uniswap could not size a swap large enough for this leg. Try a smaller deposit.");
 }
 
 /** USDG the router may pull at most for this quote: the API's maximum, or the amount plus the slippage tolerance. */
